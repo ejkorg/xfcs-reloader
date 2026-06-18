@@ -1,5 +1,87 @@
 # SSO Integration Implementation Summary
 
+---
+
+## Cross-App SSO Redirect Fix (June 2026)
+
+### Problem
+After clicking "Sign in with onsemi SSO" on the xfcs-reloader login page, the user was landing on the **ExensioReload dashboard** (`/exensio-reload`) instead of the xfcs-reloader dashboard. The Exensio auth service uses Azure AD OIDC and always redirects to its own `/sso-callback` — it was ignoring the `callback` parameter passed by xfcs-reloader.
+
+### Root Cause
+The original `AuthController.initiateSso()` in xfcs-reloader was trying to send the user directly to `https://usaz15ls088:8080/exensio-reload/auth/login?callback=...`. Exensio doesn't support a `callback` query parameter on its login page — it's a full Spring Security OAuth2/OIDC flow backed by Azure AD. After Azure AD authentication, exensioreload's `SsoAuthenticationSuccessHandler` unconditionally prepended its own context path (`/exensio-reload`) when building the redirect URL, so the user always landed in exensioreload.
+
+### Solution: Cross-App Trusted Callback
+
+A `callbackApp` mechanism was added to exensioreload so that trusted sibling apps (like xfcs-reloader) can participate in the SSO flow and receive the JWT after authentication.
+
+#### How It Works
+
+```
+xfcs-reloader login
+        │
+        ▼
+GET /xfcs-reloader/api/auth/sso/initiate?returnUrl=/dashboard
+        │  (xfcs-reloader AuthController — issues 302)
+        ▼
+GET /exensio-reload/api/auth/sso/initiate
+        ?returnUrl=%2Fdashboard
+        &callbackApp=https%3A%2F%2Fusaz15ls088%3A8080%2Fxfcs-reloader%2Fsso-callback
+        │  (exensioreload SsoController — validates callbackApp, stores in session, redirects to Azure AD)
+        ▼
+Azure AD authentication
+        │
+        ▼
+exensioreload SsoAuthenticationSuccessHandler
+   - provisions/loads user
+   - issues JWT
+   - sees callbackApp in session → redirects to:
+        ▼
+https://usaz15ls088:8080/xfcs-reloader/sso-callback?token=<JWT>&returnUrl=%2Fdashboard
+        │  (xfcs-reloader SsoCallbackComponent)
+        ▼
+xfcs-reloader /dashboard ✓
+```
+
+### Files Modified
+
+#### exensioreload backend
+| File | Change |
+|------|--------|
+| `config/SsoProperties.java` | Added `trustedCallbackApps` list and `isTrustedCallbackApp()` validator |
+| `controller/SsoController.java` | Added `callbackApp` request param to `/initiate`; stores in session when trusted |
+| `config/SsoAuthenticationSuccessHandler.java` | Added `getCrossAppCallbackFromSession()`; redirects to cross-app URL when present |
+| `resources/application.yml` | Added `reloader.sso.trusted-callback-apps` with xfcs-reloader callback URL |
+
+#### xfcs-reloader backend
+| File | Change |
+|------|--------|
+| `web/AuthController.java` | `initiateSso()` now issues a `302` redirect to exensioreload's `/api/auth/sso/initiate` with `callbackApp` param; changed return type from `ResponseEntity` to `void` |
+| `resources/application.yml` | Fixed `sso.exensio-auth-url` to point to `/exensio-reload/api/auth/sso`; `sso.callback-url` set to `https://usaz15ls088:8080/xfcs-reloader/sso-callback` |
+
+### Configuration
+
+#### exensioreload `application.yml`
+```yaml
+reloader:
+  sso:
+    trusted-callback-apps:
+      - ${ONSEMI_SSO_TRUSTED_CALLBACK_XFCS:https://usaz15ls088:8080/xfcs-reloader/sso-callback}
+```
+
+#### xfcs-reloader `application.yml`
+```yaml
+sso:
+  enabled: ${SSO_ENABLED:true}
+  exensio-auth-url: ${SSO_EXENSIO_AUTH_URL:https://usaz15ls088:8080/exensio-reload/api/auth/sso}
+  callback-url: ${SSO_CALLBACK_URL:https://usaz15ls088:8080/xfcs-reloader/sso-callback}
+```
+
+### Security
+- The `callbackApp` parameter is validated against the `trusted-callback-apps` whitelist before being stored in session. Untrusted values are silently ignored — the flow falls back to the normal local `/sso-callback`.
+- The JWT is the same token exensioreload would issue locally; xfcs-reloader trusts it because both apps share the same `RELOADER_JWT_SECRET`.
+
+---
+
 ## Problem
 The xFCS Reloader login page was displaying only basic username/password authentication without any SSO (Single Sign-On) button or link to the Exensio auth service at `https://usaz15ls088:8080/exensio-reload`.
 

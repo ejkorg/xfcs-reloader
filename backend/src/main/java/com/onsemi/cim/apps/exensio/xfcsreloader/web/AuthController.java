@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -22,10 +24,10 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final ObjectMapper objectMapper;
     
-    @Value("${sso.exensio-auth-url:https://usaz15ls088:8080/exensio-reload/auth}")
+    @Value("${sso.exensio-auth-url:https://usaz15ls088:8080/exensio-reload/api/auth/sso}")
     private String exensioAuthUrl;
-    
-    @Value("${sso.callback-url:http://localhost:4200/sso-callback}")
+
+    @Value("${sso.callback-url:https://usaz15ls088:8080/xfcs-reloader/sso-callback}")
     private String callbackUrl;
     
     @Value("${sso.enabled:true}")
@@ -49,24 +51,27 @@ public class AuthController {
 
     /**
      * Initiates SSO login by redirecting to the Exensio auth service.
-     * Encodes the return URL as a parameter for post-SSO redirect.
+     * Passes callbackApp so exensioreload redirects back to xfcs-reloader after authentication.
      */
     @GetMapping("/sso/initiate")
-    public ResponseEntity<?> initiateSso(@RequestParam(value = "returnUrl", defaultValue = "/dashboard") String returnUrl) {
+    public void initiateSso(@RequestParam(value = "returnUrl", defaultValue = "/dashboard") String returnUrl,
+                            HttpServletResponse response) throws IOException {
         if (!ssoEnabled) {
-            return ResponseEntity.badRequest().body(Map.of("error", "SSO is not enabled"));
+            response.sendError(400, "SSO is not enabled");
+            return;
         }
-        
+
         try {
-            String encoded = URLEncoder.encode(returnUrl, StandardCharsets.UTF_8);
-            String redirectUrl = exensioAuthUrl + "/login?callback=" + URLEncoder.encode(callbackUrl, StandardCharsets.UTF_8) 
-                + "&returnUrl=" + encoded;
-            
-            ObjectNode response = objectMapper.createObjectNode();
-            response.put("redirectUrl", redirectUrl);
-            return ResponseEntity.ok(response);
+            // Redirect to exensioreload's SSO initiation, passing our sso-callback as callbackApp.
+            // Exensioreload authenticates via Azure AD, then redirects to callbackUrl?token=<JWT>
+            String encodedReturnUrl = URLEncoder.encode(returnUrl, StandardCharsets.UTF_8);
+            String encodedCallbackApp = URLEncoder.encode(callbackUrl, StandardCharsets.UTF_8);
+            String redirectUrl = exensioAuthUrl + "/initiate?returnUrl=" + encodedReturnUrl
+                    + "&callbackApp=" + encodedCallbackApp;
+
+            response.sendRedirect(redirectUrl);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to initiate SSO: " + e.getMessage()));
+            response.sendError(500, "Failed to initiate SSO: " + e.getMessage());
         }
     }
 
