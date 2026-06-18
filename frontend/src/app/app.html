@@ -1,0 +1,77 @@
+<div class="app-shell">
+  <header class="hub-header" *ngIf="auth.user$ | async as user">
+    <div class="header-left">
+      <div class="brand">
+        <span class="material-icons brand-logo">inventory_2</span>
+        <span class="brand-text"><span class="accent">xFCS Reloader</span></span>
+        <span class="v-tag">v1</span>
+      </div>
+    </div>
+ 
+    <div class="header-right">
+      <nav class="hub-nav" *ngIf="auth.user$ | async">
+        <a routerLink="/dashboard" routerLinkActive="active" class="nav-link">
+          <app-glass-icon name="dashboard" [size]="18"></app-glass-icon>
+          <span class="nav-label">Dashboard</span>
+        </a>
+        <a routerLink="/history" routerLinkActive="active" class="nav-link">
+          <app-glass-icon name="history" [size]="18"></app-glass-icon>
+          <span class="nav-label">Sessions</span>
+        </a>
+        <a routerLink="/monitor" routerLinkActive="active" class="nav-link">
+          <app-glass-icon name="track_changes" [size]="18"></app-glass-icon>
+          <span class="nav-label">Monitor</span>
+        </a>
+        <a routerLink="/analytics" routerLinkActive="active" class="nav-link">
+          <app-glass-icon name="sensors" [size]="18"></app-glass-icon>
+          <span class="nav-label">Analytics</span>
+        </a>
+        <app-glass-button 
+          routerLink="/reload/new" 
+          variant="primary" 
+          size="small"
+          class="nav-action">
+          <app-glass-icon name="add" [size]="16" color="default"></app-glass-icon>
+          New Reload
+        </app-glass-button>
+      </nav>
+ 
+      <a href="http://usaz15ls088:8080/exensio-integration-hub/" target="_blank" rel="noopener noreferrer" class="hub-link" title="Go to Integration Hub">
+        <span class="material-icons">home</span>
+        <span class="hub-link-label">Hub</span>
+      </a>
+ 
+      <div class="user-info">
+        <span class="username">{{ user.username }}</span>
+        <button class="theme-toggle" (click)="toggleTheme()"
+          [title]="themeService.theme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'"
+          [attr.aria-label]="themeService.theme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+          <span class="toggle-track" [class.is-dark]="themeService.theme() === 'dark'">
+            <span class="toggle-thumb">
+              <span class="material-icons toggle-thumb-icon">{{ themeService.theme() === 'dark' ? 'dark_mode' : 'light_mode' }}</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" (click)="logout()" title="Logout" class="icon-btn logout-btn" aria-label="Logout">
+          <span class="material-icons">logout</span>
+        </button>
+      </div>
+    </div>
+  </header>
+ 
+  <div class="main-shell" 
+       [class.no-header]="!(auth.user$ | async)"
+       [class.no-sidebar]="true">
+    <main class="hub-main">
+      <div class="content-container">
+        <router-outlet></router-outlet>
+      </div>
+    </main>
+  </div>
+ 
+  <!-- Toast Notifications -->
+  <app-toast-container></app-toast-container>
+ 
+  <div class="glow-orb orb-1" aria-hidden="true"></div>
+  <div class="glow-orb orb-2" aria-hidden="true"></div>
+</div>

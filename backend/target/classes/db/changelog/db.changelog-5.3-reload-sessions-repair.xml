@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="5.3.1-repair-area-column" author="xfcs-reloader">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="xfcs_dearchiver_reload_sessions" columnName="area"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="xfcs_dearchiver_reload_sessions">
+            <column name="area" type="VARCHAR(255)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="5.3.2-repair-tester-type-column" author="xfcs-reloader">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="xfcs_dearchiver_reload_sessions" columnName="tester_type"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="xfcs_dearchiver_reload_sessions">
+            <column name="tester_type" type="VARCHAR(255)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="5.3.3-repair-site-area-index" author="xfcs-reloader">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="xfcs_dearchiver_reload_sessions" columnName="site"/>
+            <columnExists tableName="xfcs_dearchiver_reload_sessions" columnName="area"/>
+            <not>
+                <indexExists tableName="xfcs_dearchiver_reload_sessions" indexName="idx_xfcs_rs_site_area"/>
+            </not>
+        </preConditions>
+
+        <createIndex tableName="xfcs_dearchiver_reload_sessions" indexName="idx_xfcs_rs_site_area">
+            <column name="site"/>
+            <column name="area"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="5.3.4-repair-environment-index" author="xfcs-reloader">
+        <preConditions onFail="MARK_RAN">
+            <columnExists tableName="xfcs_dearchiver_reload_sessions" columnName="environment"/>
+            <not>
+                <indexExists tableName="xfcs_dearchiver_reload_sessions" indexName="idx_xfcs_rs_environment"/>
+            </not>
+        </preConditions>
+
+        <createIndex tableName="xfcs_dearchiver_reload_sessions" indexName="idx_xfcs_rs_environment">
+            <column name="environment"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

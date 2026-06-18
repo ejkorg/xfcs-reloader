@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <changeSet id="5.7-session-notifications" author="xfcs-reloader">
+        <preConditions onFail="MARK_RAN" onError="HALT">
+            <not>
+                <tableExists tableName="xfcs_dearchiver_reload_session_notifications"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="xfcs_dearchiver_reload_session_notifications">
+            <column name="session_id" type="VARCHAR(64)">
+                <constraints primaryKey="true" primaryKeyName="pk_xfcs_reload_session_notif" nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(32)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="recipient" type="VARCHAR(1024)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="subject" type="VARCHAR(512)"/>
+            <column name="sent_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

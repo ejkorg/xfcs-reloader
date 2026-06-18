@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <changeSet id="5.4-pending-files" author="xfcs-reloader">
+        <createTable tableName="xfcs_dearchiver_reload_pending_files">
+            <column name="abs_path" type="VARCHAR(1024)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="session_id" type="VARCHAR(64)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="requester" type="VARCHAR(128)"/>
+            <column name="environment" type="VARCHAR(128)"/>
+            <column name="file_name" type="VARCHAR(512)"/>
+            <column name="original_file_name" type="VARCHAR(512)"/>
+            <column name="inbox_root" type="VARCHAR(1024)"/>
+            <column name="created_at" type="TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_known_path" type="VARCHAR(1024)"/>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <changeSet id="5.6-pending-files-status" author="xfcs-reloader">
+        <addColumn tableName="xfcs_dearchiver_reload_pending_files">
+            <column name="file_status" type="VARCHAR(32)" defaultValue="pending">
+                <constraints nullable="false"/>
+            </column>
+            <column name="error_reason" type="VARCHAR(2000)"/>
+            <column name="resolved_at" type="TIMESTAMP"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

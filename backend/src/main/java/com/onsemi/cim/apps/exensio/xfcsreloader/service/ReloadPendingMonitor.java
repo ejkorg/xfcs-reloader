@@ -1,0 +1,634 @@
+package com.onsemi.cim.apps.exensio.xfcsreloader.service;
+
+import com.onsemi.cim.apps.exensio.xfcsreloader.config.XfcsProperties;
+import com.onsemi.cim.apps.exensio.xfcsreloader.entity.ReloadPendingFileEntity;
+import com.onsemi.cim.apps.exensio.xfcsreloader.entity.ReloadSessionEntity;
+import com.onsemi.cim.apps.exensio.xfcsreloader.entity.ReloadSessionEventEntity;
+import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadPendingFileRepository;
+import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadSessionEventRepository;
+import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadSessionRepository;
+import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.ReloadSessionEvent;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.onsemi.cim.apps.exensio.xfcsreloader.service.exensio.BatchLookupResult;
+import com.onsemi.cim.apps.exensio.xfcsreloader.service.exensio.ExensioClient;
+import com.onsemi.cim.apps.exensio.xfcsreloader.config.ExensioProperties;
+import java.io.IOException;
+import java.nio.file.*;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Single authoritative component for all pending-file scanning, session finalization,
+ * and stuck-session detection. Publishes every event to {@link SseEventBroker}.
+ */
+@Component
+public class ReloadPendingMonitor {
+
+    private static final Logger log = LoggerFactory.getLogger(ReloadPendingMonitor.class);
+
+    private static final List<String> TERMINAL_STATUSES =
+            List.of("completed", "failed", "partially_failed", "cancelled");
+
+    private final ReloadSessionRepository sessionRepository;
+    private final ReloadSessionEventRepository eventRepository;
+    private final ReloadPendingFileRepository pendingFileRepository;
+    private final SseEventBroker sseEventBroker;
+    private final XfcsProperties xfcsProperties;
+    private final EnvFolderResolver envFolderResolver;
+    private final ScheduledExecutorService monitorExecutor;
+    private final ExensioProperties exensioProperties;
+    private final ExensioClient exensioClient;
+
+    @Autowired(required = false)
+    private ReloadSessionCompletionEmailService completionEmailService;
+
+    public ReloadPendingMonitor(ReloadSessionRepository sessionRepository,
+                                ReloadSessionEventRepository eventRepository,
+                                ReloadPendingFileRepository pendingFileRepository,
+                                SseEventBroker sseEventBroker,
+                                XfcsProperties xfcsProperties,
+                                EnvFolderResolver envFolderResolver,
+                                ExensioProperties exensioProperties,
+                                ExensioClient exensioClient) {
+        this.sessionRepository = sessionRepository;
+        this.eventRepository = eventRepository;
+        this.pendingFileRepository = pendingFileRepository;
+        this.sseEventBroker = sseEventBroker;
+        this.xfcsProperties = xfcsProperties;
+        this.envFolderResolver = envFolderResolver;
+        this.exensioProperties = exensioProperties;
+        this.exensioClient = exensioClient;
+        this.monitorExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "xfcs-pending-monitor");
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    @PostConstruct
+    public void init() {
+        log.info("[PendingMonitor] Initialized. Background scanning active.");
+        cleanupOrphanedPendingFiles();
+
+        long intervalSec = Math.max(1, xfcsProperties.getPendingMonitorIntervalSec());
+        log.info("[PendingMonitor] Starting monitor loop with interval={}s", intervalSec);
+        monitorExecutor.scheduleWithFixedDelay(this::safeScanPendingFiles, intervalSec, intervalSec, TimeUnit.SECONDS);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        try {
+            monitorExecutor.shutdownNow();
+            log.info("[PendingMonitor] Monitor loop stopped.");
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void safeScanPendingFiles() {
+        try {
+            scanPendingFiles();
+        } catch (Exception e) {
+            log.error("[PendingMonitor] Unhandled error in monitor loop: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * On startup, remove pending file entries for sessions that are already terminal.
+     * These are leftovers from previous runs where the monitor failed to clean up.
+     */
+    private void cleanupOrphanedPendingFiles() {
+        try {
+            List<ReloadPendingFileEntity> allPending = pendingFileRepository.findAll();
+            if (allPending.isEmpty()) return;
+
+            int removed = 0;
+            for (ReloadPendingFileEntity pf : allPending) {
+                sessionRepository.findById(pf.getSessionId()).ifPresent(session -> {
+                    String status = session.getStatus() == null ? "" : session.getStatus().toLowerCase();
+                    if (TERMINAL_STATUSES.contains(status)) {
+                        pendingFileRepository.deleteById(pf.getAbsPath());
+                    }
+                });
+            }
+            pendingFileRepository.flush();
+            log.info("[PendingMonitor] Startup cleanup: removed orphaned pending entries for terminal sessions.");
+        } catch (Exception e) {
+            log.warn("[PendingMonitor] Startup cleanup failed: {}", e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void scanPendingFiles() {
+        try {
+            List<ReloadPendingFileEntity> pending;
+            try {
+                pending = pendingFileRepository.findAll();
+            } catch (Exception e) {
+                log.warn("[PendingMonitor] Failed to query pending files: {}", e.getMessage());
+                return;
+            }
+
+            if (pending.isEmpty()) {
+                log.debug("[PendingMonitor] No pending files to scan.");
+                try {
+                    long activeSessions = sessionRepository.countByStatusNotIn(TERMINAL_STATUSES);
+                    if (activeSessions > 0) {
+                        log.warn("[PendingMonitor] No pending files found, but {} active sessions exist. " +
+                                        "Pending registration may have failed or not committed.",
+                                activeSessions);
+                    }
+                } catch (Exception ignored) {
+                    // best-effort diagnostics only
+                }
+                checkStuckSessions();
+                return;
+            }
+            log.info("[PendingMonitor] Scanning {} pending files...", pending.size());
+
+            // Old backend parity: validate session existence in batch and drop orphaned pending rows.
+            // This avoids endless scanning noise for stale rows whose parent session no longer exists.
+            Set<String> sessionIds = new HashSet<>();
+            for (ReloadPendingFileEntity pf : pending) {
+                if (pf.getSessionId() != null && !pf.getSessionId().isBlank()) {
+                    sessionIds.add(pf.getSessionId());
+                }
+            }
+            Set<String> validSessionIds = new HashSet<>();
+            if (!sessionIds.isEmpty()) {
+                for (ReloadSessionEntity s : sessionRepository.findAllById(sessionIds)) {
+                    if (s != null && s.getSessionId() != null) {
+                        validSessionIds.add(s.getSessionId());
+                    }
+                }
+            }
+
+            List<String> toRemove = new ArrayList<>();
+            Set<String> sessionsToFinalize = new HashSet<>();
+
+            for (ReloadPendingFileEntity pf : pending) {
+                try {
+                    if (pf.getSessionId() == null || pf.getSessionId().isBlank() ||
+                            !validSessionIds.contains(pf.getSessionId())) {
+                        log.warn("[PendingMonitor] Dropping orphan pending entry: absPath={} sessionId={}",
+                                pf.getAbsPath(), pf.getSessionId());
+                        toRemove.add(pf.getAbsPath());
+                        continue;
+                    }
+
+                    String fName = pf.getFileName();
+                    String environment = pf.getEnvironment();
+
+                    log.info("[PendingMonitor] Checking file: {} | env: {} | absPath: {}",
+                            fName, environment, pf.getAbsPath());
+
+                    // Resolve the env root at scan time (same as old backend).
+                    // This ensures we always use the correct inbox path even if the DB
+                    // stored a stale/fallback inboxRoot from before the SSH fix.
+                    java.nio.file.Path envRoot = envFolderResolver.resolveInboxFolder(environment);
+                    log.info("[PendingMonitor] Resolved env root for '{}': {}", environment, envRoot);
+
+                    // Recursively search for the file from the env root (unlimited depth)
+                    java.util.Optional<java.nio.file.Path> foundOpt = findFileRecursively(envRoot, fName);
+
+                    if (foundOpt.isEmpty()) {
+                        log.info("[PendingMonitor] File not found in env tree: {} (root={})", fName, envRoot);
+                        continue;
+                    }
+
+                    java.nio.file.Path foundPath = foundOpt.get();
+                    String foundStr = foundPath.toString().replace("\\", "/").toLowerCase();
+                    String absPathLower = pf.getAbsPath() == null ? "" : pf.getAbsPath().replace("\\", "/").toLowerCase();
+
+                    log.info("[PendingMonitor] Found: {}", foundPath);
+
+                    if (foundStr.equals(absPathLower)) {
+                        // Still at inbox root — staging
+                        if (!"staging".equals(pf.getFileStatus())) {
+                            pf.setFileStatus("staging");
+                            pendingFileRepository.save(pf);
+                        }
+                        if (pf.getLastKnownPath() == null || !pf.getLastKnownPath().equals(foundPath.toString())) {
+                            appendEvent(pf.getSessionId(), "file_staging",
+                                    "Still staging (in inbox root): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ")",
+                                    pf.getRequester(), null);
+                            pf.setLastKnownPath(foundPath.toString());
+                            pendingFileRepository.save(pf);
+                        }
+                        continue;
+                    }
+
+                    if (foundStr.contains("/processed/") || foundStr.endsWith("/processed")) {
+                        String destination = detectDestinationFolder(foundStr);
+                        
+                        if (exensioProperties.isEnabled()) {
+                            pf.setFileStatus("exensio_loading");
+                            pf.setDestinationFolder(destination);
+                            pendingFileRepository.save(pf);
+                            
+                            String msg = destination == null
+                                ? ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") - waiting for Exensio confirmation")
+                                : ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Destination: " + destination + " - waiting for Exensio confirmation");
+                                
+                            appendEvent(pf.getSessionId(), "file_etl_completed", msg, pf.getRequester(), null);
+                            log.info("[PendingMonitor] ETL completed for: {}. Awaiting Exensio.", pf.getFileName());
+                            // Do not add to toRemove yet, wait for Exensio
+                        } else {
+                            pf.setFileStatus("completed");
+                            pf.setResolvedAt(java.time.Instant.now());
+                            pf.setDestinationFolder(destination);
+                            pendingFileRepository.save(pf);
+
+                            String msg = destination == null
+                                ? ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ")")
+                                : ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Destination: " + destination);
+
+                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            log.info("[PendingMonitor] ETL completed for: {} (Lot: {})", pf.getFileName(), pf.getUserLotId());
+                            toRemove.add(pf.getAbsPath());
+                            sessionsToFinalize.add(pf.getSessionId());
+                        }
+
+                    } else if (foundStr.contains("/notprocessed/") || foundStr.endsWith("/notprocessed")) {
+                        String errReason = tryReadErrReason(foundPath.toString());
+                        String msg = errReason == null
+                                ? ("ETL rejected (NotProcessed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ")")
+                                : ("ETL rejected (NotProcessed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Reason: " + errReason);
+
+                        pf.setFileStatus("failed");
+                        pf.setErrorReason(errReason);
+                        pf.setResolvedAt(java.time.Instant.now());
+                        pendingFileRepository.save(pf);
+
+                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_NOT_PROCESSED");
+                        log.warn("[PendingMonitor] ETL rejected file: {}", pf.getFileName());
+
+                        toRemove.add(pf.getAbsPath());
+                        sessionsToFinalize.add(pf.getSessionId());
+
+                    } else if (foundStr.contains("/reworkfiles/") || foundStr.endsWith("/reworkfiles")) {
+                        String errReason = "File issue. Check logs for details.";
+                        String msg = "ETL sent file to ReworkFiles: " + pf.getFileName()
+                                + " (Lot: " + pf.getUserLotId() + ") | Reason: " + errReason;
+
+                        pf.setFileStatus("failed");
+                        pf.setErrorReason(errReason);
+                        pf.setResolvedAt(java.time.Instant.now());
+                        pendingFileRepository.save(pf);
+
+                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_REWORK_FILES");
+                        log.warn("[PendingMonitor] ETL moved file to ReworkFiles: {}", pf.getFileName());
+
+                        toRemove.add(pf.getAbsPath());
+                        sessionsToFinalize.add(pf.getSessionId());
+
+                    } else if (!foundPath.toString().equals(pf.getLastKnownPath())) {
+                        appendEvent(pf.getSessionId(), "file_staging", "File moved to: " + foundPath, pf.getRequester(), null);
+                        pf.setLastKnownPath(foundPath.toString());
+                        pendingFileRepository.save(pf);
+                    }
+                } catch (Exception ex) {
+                    log.warn("[PendingMonitor] Error scanning file '{}': {}", pf.getFileName(), ex.getMessage());
+                }
+            }
+
+            if (!toRemove.isEmpty()) {
+                for (String key : toRemove) {
+                    pendingFileRepository.deleteById(key);
+                }
+                pendingFileRepository.flush();
+            }
+
+            if (exensioProperties.isEnabled()) {
+                List<ReloadPendingFileEntity> exensioLoading = pendingFileRepository.findByFileStatus("exensio_loading");
+                if (!exensioLoading.isEmpty()) {
+                    processExensioLoading(exensioLoading, sessionsToFinalize);
+                }
+            }
+
+            for (String sessionId : sessionsToFinalize) {
+                finalizeSessionIfDone(sessionId);
+            }
+
+            checkStuckSessions();
+
+        } catch (Exception e) {
+            log.error("[PendingMonitor] Unhandled error in scanPendingFiles: {}", e.getMessage(), e);
+        }
+    }
+
+    private void processExensioLoading(List<ReloadPendingFileEntity> batch, Set<String> sessionsToFinalize) {
+        log.info("[PendingMonitor] Processing {} files waiting for Exensio confirmation", batch.size());
+        try {
+            List<BatchLookupResult.RecordUpdate> updates = exensioClient.lotWaferLookupBatch(batch);
+
+            for (BatchLookupResult.RecordUpdate update : updates) {
+                pendingFileRepository.findById(update.absPath()).ifPresent(pf -> {
+                    boolean terminal = false;
+
+                    switch (update.type()) {
+                        case DONE -> {
+                            pf.setFileStatus("completed");
+                            pf.setResolvedAt(Instant.now());
+                            pf.setExensioWaferKey(update.waferKey());
+                            pf.setExensioPgKey(update.pgKey());
+                            String msg = "Loaded in Exensio: " + pf.getFileName() + " (pgKey=" + update.pgKey() + ")";
+                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            terminal = true;
+                        }
+                        case NOT_FOUND -> {
+                            long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
+                            if (elapsed >= exensioProperties.getTimeoutMinutes()) {
+                                pf.setFileStatus("failed");
+                                pf.setResolvedAt(Instant.now());
+                                pf.setErrorReason("Exensio load timeout — not found after " + exensioProperties.getTimeoutMinutes() + " mins");
+                                String msg = "Failed to load in Exensio (Timeout): " + pf.getFileName();
+                                appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "EXENSIO_TIMEOUT");
+                                terminal = true;
+                            }
+                        }
+                        case ERROR, FAILED -> {
+                            long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
+                            if (elapsed >= exensioProperties.getTimeoutMinutes()) {
+                                pf.setFileStatus("failed");
+                                pf.setResolvedAt(Instant.now());
+                                pf.setErrorReason("Exensio API Error: " + update.errorMessage());
+                                String msg = "Exensio API error for " + pf.getFileName() + ": " + update.errorMessage();
+                                appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "EXENSIO_ERROR");
+                                terminal = true;
+                            }
+                        }
+                    }
+
+                    if (terminal) {
+                        pendingFileRepository.save(pf);
+                        pendingFileRepository.deleteById(pf.getAbsPath());
+                        sessionsToFinalize.add(pf.getSessionId());
+                    }
+                });
+            }
+            pendingFileRepository.flush();
+        } catch (Exception e) {
+            log.error("[PendingMonitor] Error processing Exensio loading batch: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Recursively searches for a file by exact name from the given root directory.
+     * Same approach as the old backend's findFileRecursively().
+     */
+    private java.util.Optional<java.nio.file.Path> findFileRecursively(java.nio.file.Path rootDir, String fileName) {
+        if (rootDir == null || fileName == null || !java.nio.file.Files.exists(rootDir)) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.nio.file.Files.find(rootDir, Integer.MAX_VALUE,
+                    (path, attrs) -> attrs.isRegularFile() && path.getFileName().toString().equals(fileName))
+                    .findFirst();
+        } catch (Exception e) {
+            log.debug("[PendingMonitor] findFileRecursively error in '{}': {}", rootDir, e.getMessage());
+            return java.util.Optional.empty();
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Stuck-session detection
+    // ──────────────────────────────────────────────────────────────────────────
+
+    void checkStuckSessions() {
+        int timeoutMin = xfcsProperties.getStuckSessionTimeoutMin();
+        if (timeoutMin <= 0) return;
+
+        Instant cutoff = Instant.now().minusSeconds((long) timeoutMin * 60);
+        try {
+            List<ReloadSessionEntity> nonTerminal = sessionRepository.findAll().stream()
+                    .filter(s -> !TERMINAL_STATUSES.contains(
+                            s.getStatus() == null ? "" : s.getStatus().toLowerCase()))
+                    .filter(s -> s.getCreatedAt() != null && s.getCreatedAt().isBefore(cutoff))
+                    .toList();
+
+            for (ReloadSessionEntity session : nonTerminal) {
+                String sessionId = session.getSessionId();
+                log.warn("[PendingMonitor] Stuck session detected: {} (created {})", sessionId, session.getCreatedAt());
+
+                session.setStatus("failed");
+                session.setCompletedAt(Instant.now());
+                session.setMessage("Session timed out after " + timeoutMin + " minutes with no ETL resolution");
+                sessionRepository.save(session);
+
+                appendEvent(sessionId, "SESSION_TIMED_OUT",
+                        "Session automatically failed: no ETL resolution within " + timeoutMin + " minutes",
+                        "SYSTEM", "STUCK_SESSION_TIMEOUT");
+
+                // Remove all pending files for this session
+                List<ReloadPendingFileEntity> stuckFiles = pendingFileRepository.findBySessionId(sessionId);
+                for (ReloadPendingFileEntity pf : stuckFiles) {
+                    pendingFileRepository.deleteById(pf.getAbsPath());
+                }
+                if (!stuckFiles.isEmpty()) {
+                    pendingFileRepository.flush();
+                }
+
+                sseEventBroker.complete(sessionId);
+
+                if (completionEmailService != null) {
+                    completionEmailService.notifyIfTerminal(sessionId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("[PendingMonitor] Error in checkStuckSessions: {}", e.getMessage(), e);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Session finalization
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private void finalizeSessionIfDone(String sessionId) {
+        sessionRepository.findById(sessionId).ifPresent(session -> {
+            long remaining = pendingFileRepository.countBySessionId(sessionId);
+            if (remaining == 0) {
+                List<ReloadSessionEventEntity> events = eventRepository.findBySessionId(sessionId);
+                boolean hasFailure = events.stream()
+                        .anyMatch(e -> "file_failed".equalsIgnoreCase(e.getEventType()));
+                boolean hasCompleted = events.stream()
+                        .anyMatch(e -> "file_completed".equalsIgnoreCase(e.getEventType()));
+
+                String finalStatus;
+                String finalMessage;
+                if (hasFailure && hasCompleted) {
+                    finalStatus = "partially_failed";
+                    finalMessage = "Completed with partial failures";
+                } else if (hasFailure) {
+                    finalStatus = "failed";
+                    finalMessage = "Completed with failures";
+                } else {
+                    finalStatus = "completed";
+                    finalMessage = "All files processed successfully";
+                }
+
+                session.setStatus(finalStatus);
+                session.setCompletedAt(Instant.now());
+                session.setMessage(finalMessage);
+                sessionRepository.save(session);
+
+                appendEvent(sessionId, session.getStatus().toUpperCase(), session.getMessage(), "SYSTEM", null);
+                log.info("[PendingMonitor] Session {} finalized as {}", sessionId, session.getStatus());
+
+                sseEventBroker.complete(sessionId);
+
+                if (completionEmailService != null) {
+                    completionEmailService.notifyIfTerminal(sessionId);
+                }
+            }
+        });
+    }
+
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // File search helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private String tryReadErrReason(String foundAbsolutePath) {
+        try {
+            Path foundPath = Path.of(foundAbsolutePath);
+            String fileName = foundPath.getFileName().toString();
+
+            Path errPath = foundPath.resolveSibling(fileName + ".err");
+            if (!Files.exists(errPath) || !Files.isRegularFile(errPath)) {
+                Path errPathUpper = foundPath.resolveSibling(fileName + ".ERR");
+                if (Files.exists(errPathUpper) && Files.isRegularFile(errPathUpper)) {
+                    return readErrText(errPathUpper);
+                }
+                return null;
+            }
+            return readErrText(errPath);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private String readErrText(Path errPath) {
+        try {
+            String txt = Files.readString(errPath);
+            if (txt == null) return null;
+            txt = txt.trim();
+            if (txt.isEmpty()) return null;
+
+            String[] lines = txt.split("\\r?\\n");
+            String firstNonEmpty = null;
+
+            // Prefer the most meaningful ETL reason line.
+            for (String line : lines) {
+                if (line == null) continue;
+                String t = line.trim();
+                if (t.isEmpty()) continue;
+                if (firstNonEmpty == null) firstNonEmpty = t;
+
+                String extracted = extractStructuredErrReason(t);
+                if (extracted != null && !extracted.isBlank()) {
+                    return truncateReason(extracted);
+                }
+
+                if (isLikelyHumanReason(t)) {
+                    return truncateReason(t);
+                }
+            }
+
+            return firstNonEmpty == null ? null : truncateReason(firstNonEmpty);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Parses common ETL tabular error rows like:
+     * 1  9001  E  0  0  NO_WAFERID indicated inside the file
+     */
+    private String extractStructuredErrReason(String line) {
+        if (line == null || line.isBlank()) return null;
+        String compact = line.trim();
+
+        // Ignore pure counters/headers like "2 0".
+        if (compact.matches("^[0-9\\s]+$")) return null;
+
+        // Ignore stacktrace continuation lines.
+        String lower = compact.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("at ") || lower.contains(" called at ")) return null;
+
+        // Attempt to capture trailing message after fixed numeric/status columns.
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^\\d+\\s+\\d+\\s+[A-Za-z]\\s+\\d+\\s+\\d+\\s+(.+)$")
+                .matcher(compact);
+        if (m.find()) {
+            String reason = m.group(1).trim();
+            return reason.isBlank() ? null : reason;
+        }
+
+        return null;
+    }
+
+    private boolean isLikelyHumanReason(String line) {
+        if (line == null || line.isBlank()) return false;
+        String lower = line.toLowerCase(Locale.ROOT);
+
+        if (line.matches("^[0-9\\s]+$")) return false;
+        if (lower.startsWith("at ") || lower.contains(" called at ")) return false;
+
+        // Typical meaningful indicators from ETL outputs.
+        return lower.contains("error")
+                || lower.contains("failed")
+                || lower.contains("invalid")
+                || lower.contains("no_")
+                || lower.contains("missing")
+                || lower.contains("inside the file")
+                || lower.contains("reason");
+    }
+
+    private String truncateReason(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if (trimmed.length() <= 500) return trimmed;
+        return trimmed.substring(0, 500) + "...";
+    }
+
+    private String detectDestinationFolder(String path) {
+        if (path == null || path.isBlank()) return null;
+        String lower = path.replace("\\", "/").toLowerCase(Locale.ROOT);
+        if (lower.contains("/production/")) return "PRODUCTION";
+        if (lower.contains("/sandbox/")) return "SANDBOX";
+        return null;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Event helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private void appendEvent(String sessionId, String type, String message, String actor, String errorCode) {
+        try {
+            ReloadSessionEventEntity entity = new ReloadSessionEventEntity();
+            entity.setSessionId(sessionId);
+            entity.setEventTime(Instant.now());
+            entity.setEventType(type);
+            entity.setMessage(message);
+            entity.setActor(actor);
+            entity.setErrorCode(errorCode);
+            ReloadSessionEventEntity saved = eventRepository.save(entity);
+
+            // Push to SSE subscribers
+            ReloadSessionEvent dto = new ReloadSessionEvent(
+                    saved.getId(), sessionId, saved.getEventTime(), type, message, actor, errorCode
+            );
+            sseEventBroker.publish(sessionId, dto);
+        } catch (Exception ignored) {}
+    }
+}

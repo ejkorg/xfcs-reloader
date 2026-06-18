@@ -1,0 +1,20 @@
+{
+  "/xfcs-reloader/api": {
+    "target": "http://127.0.0.1:8005",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/xfcs-reloader/api": "/xfcs-reloader/api"
+    },
+    "logLevel": "info"
+  },
+  "/resender/api": {
+    "target": "http://127.0.0.1:8004",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/resender/api": "/resender/api"
+    },
+    "logLevel": "info"
+  }
+}

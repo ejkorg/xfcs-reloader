@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                    http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <!-- Keep table names aligned with new_ed / shared schema expectations -->
+    <include file="db/changelog/db.changelog-5.0-reload-sessions.xml"/>
+    <include file="db/changelog/db.changelog-5.1-reload-sessions-enhancement.xml"/>
+    <include file="db/changelog/db.changelog-5.3-reload-sessions-repair.xml"/>
+    <include file="db/changelog/db.changelog-5.2-reload-session-events.xml"/>
+    <include file="db/changelog/db.changelog-5.4-pending-files.xml"/>
+    <include file="db/changelog/db.changelog-5.5-pending-files-user-lot-id.xml"/>
+    <include file="db/changelog/db.changelog-5.6-pending-files-status.xml"/>
+    <include file="db/changelog/db.changelog-5.7-session-notifications.xml"/>
+    <include file="db/changelog/db.changelog-5.8-pending-files-destination.xml"/>
+    <include file="db/changelog/db.changelog-5.9-pending-files-exensio.xml"/>
+
+</databaseChangeLog>
