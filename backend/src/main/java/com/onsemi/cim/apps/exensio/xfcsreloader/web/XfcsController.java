@@ -81,6 +81,12 @@ public class XfcsController {
         return envConfigService.refreshNow();
     }
 
+    @PostMapping("/test")
+    public Map<String, String> testPost(@RequestBody Map<String, Object> body) {
+        log.info("[Xfcs] /test POST ENTERED body={}", body);
+        return Map.of("status", "ok");
+    }
+
     @PostMapping("/archive/search")
     public List<SearchResult> search(@RequestBody SearchCriteria criteria) {
         assertFeatureEnabled();
