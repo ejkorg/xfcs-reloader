@@ -8,14 +8,11 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.context.HttpRequestResponseHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
 
 import java.util.List;
 
-/**
- * Reads JWT from the Authorization header and creates a SecurityContext.
- * Configured via {@link org.springframework.security.config.annotation.web.builders.HttpSecurity#securityContext(java.util.function.Consumer)}.
- */
 public class JwtSecurityContextRepository implements SecurityContextRepository {
 
     private static final Logger log = LoggerFactory.getLogger(JwtSecurityContextRepository.class);
@@ -27,7 +24,8 @@ public class JwtSecurityContextRepository implements SecurityContextRepository {
     }
 
     @Override
-    public SecurityContext loadContext(HttpServletRequest request) {
+    public SecurityContext loadContext(HttpRequestResponseHolder requestResponseHolder) {
+        HttpServletRequest request = requestResponseHolder.getRequest();
         String authHeader = request.getHeader("Authorization");
         String token = null;
 
@@ -59,13 +57,11 @@ public class JwtSecurityContextRepository implements SecurityContextRepository {
             return context;
         }
 
-        // No valid token — return empty context (anonymous)
         return SecurityContextHolder.createEmptyContext();
     }
 
     @Override
     public void saveContext(SecurityContext context, HttpServletRequest request, HttpServletResponse response) {
-        // Stateless — nothing to persist
     }
 
     @Override
