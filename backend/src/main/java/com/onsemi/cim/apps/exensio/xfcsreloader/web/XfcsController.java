@@ -13,7 +13,6 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -65,28 +64,24 @@ public class XfcsController {
     }
 
     @GetMapping("/envs")
-    @PreAuthorize("isAuthenticated()")
     public List<EnvYearRange> envs() {
         assertFeatureEnabled();
         return envConfigService.loadEnvs();
     }
 
     @GetMapping("/cache/info")
-    @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public EnvConfCacheInfo cacheInfo() {
         assertFeatureEnabled();
         return envConfigService.getCacheInfo();
     }
 
     @PostMapping("/cache/refresh")
-    @PreAuthorize("hasAnyRole('ADMIN','SUPER_ADMIN')")
     public EnvConfCacheInfo refreshCache() {
         assertFeatureEnabled();
         return envConfigService.refreshNow();
     }
 
     @PostMapping("/archive/search")
-    @PreAuthorize("isAuthenticated()")
     public List<SearchResult> search(@RequestBody SearchCriteria criteria) {
         assertFeatureEnabled();
         log.info("[Xfcs] /archive/search called with criteria: {}", criteria);
@@ -96,7 +91,6 @@ public class XfcsController {
     }
 
     @GetMapping("/archive/find-lots")
-    @PreAuthorize("isAuthenticated()")
     public List<ArchiveLotDetail> findLots(@RequestParam("environment") String environment,
                                            @RequestParam(value = "lot", required = false) String lot,
                                            @RequestParam(value = "wafer", required = false) String wafer) {
@@ -105,7 +99,6 @@ public class XfcsController {
     }
 
     @PostMapping("/files/download")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<byte[]> download(@RequestBody DownloadFilesRequest request) {
         assertFeatureEnabled();
         byte[] bytes = archiveSearchService.zipSelected(request.paths());
@@ -117,7 +110,6 @@ public class XfcsController {
     }
 
     @PostMapping("/reload")
-    @PreAuthorize("isAuthenticated()")
     public ReloadSession createReload(@RequestBody ReloadRequest request, Authentication authentication) {
         assertFeatureEnabled();
         String requester = request.requester() != null && !request.requester().isBlank()
@@ -131,21 +123,18 @@ public class XfcsController {
     }
 
     @GetMapping("/reload/{sessionId}")
-    @PreAuthorize("isAuthenticated()")
     public ReloadStatus status(@PathVariable String sessionId) {
         assertFeatureEnabled();
         return reloadSessionService.getStatus(sessionId);
     }
 
     @GetMapping("/reload/{sessionId}/events")
-    @PreAuthorize("isAuthenticated()")
     public List<ReloadSessionEvent> events(@PathVariable String sessionId) {
         assertFeatureEnabled();
         return reloadSessionService.getEvents(sessionId);
     }
 
     @GetMapping(value = "/reload/{sessionId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    @PreAuthorize("isAuthenticated()")
     public SseEmitter streamSession(@PathVariable String sessionId,
                                     @RequestParam(required = false) Long lastEventId) {
         assertFeatureEnabled();
@@ -153,14 +142,12 @@ public class XfcsController {
     }
 
     @GetMapping("/reload/{sessionId}/files")
-    @PreAuthorize("isAuthenticated()")
     public List<FileStatusDto> sessionFiles(@PathVariable String sessionId) {
         assertFeatureEnabled();
         return reloadSessionService.getSessionFiles(sessionId);
     }
 
     @PostMapping("/reload/{sessionId}/cancel")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> cancelSession(@PathVariable String sessionId) {
         assertFeatureEnabled();
         try {
@@ -173,7 +160,6 @@ public class XfcsController {
     }
 
     @GetMapping("/envs/{environment}/info")
-    @PreAuthorize("isAuthenticated()")
     public Map<String, Object> envInfo(@PathVariable("environment") String environment) {
         assertFeatureEnabled();
         List<EnvYearRange> envs = envConfigService.loadEnvs();
@@ -234,7 +220,6 @@ public class XfcsController {
     }
 
     @GetMapping("/sessions")
-    @PreAuthorize("isAuthenticated()")
     public List<ReloadStatus> sessions(Authentication authentication) {
         assertFeatureEnabled();
         boolean isAdmin = authentication != null && authentication.getAuthorities().stream()
@@ -252,7 +237,6 @@ public class XfcsController {
     }
 
     @GetMapping("/dashboard")
-    @PreAuthorize("isAuthenticated()")
     public DashboardData dashboard() {
         assertFeatureEnabled();
         List<String> terminalStatuses = List.of("completed", "failed", "partially_failed", "cancelled");
