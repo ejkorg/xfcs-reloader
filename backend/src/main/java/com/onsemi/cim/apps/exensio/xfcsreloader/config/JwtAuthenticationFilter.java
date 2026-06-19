@@ -14,14 +14,6 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 
-/**
- * Spring Security filter that runs inside the Spring Security chain,
- * AFTER {@link org.springframework.security.web.context.SecurityContextHolderFilter}
- * has loaded/exchanged the SecurityContext.
- * <p>
- * Reads JWT from the Authorization header and sets the authentication
- * in the SecurityContextHolder.
- */
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
@@ -48,7 +40,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             List<String> rawRoles = jwtUtil.extractRoles(token);
 
             if (rawRoles.isEmpty()) {
-                log.warn("[JWT-FILTER] No roles in token for user='{}'; defaulting to USER", username);
+                log.warn("[JWT] No roles in token for user='{}'; defaulting to USER", username);
                 rawRoles = List.of("USER");
             }
 
@@ -61,21 +53,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     new UsernamePasswordAuthenticationToken(username, token, authorities);
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.info("[JWT-FILTER] Authenticated user='{}' method={} uri={}",
-                    username, request.getMethod(), request.getRequestURI());
+            log.info("[JWT] Authenticated user='{}' authorities={}", username, authorities);
         } else if (token != null) {
-            log.warn("[JWT-FILTER] Invalid token for {} {}", request.getMethod(), request.getRequestURI());
+            log.warn("[JWT] Invalid token for {} {}", request.getMethod(), request.getRequestURI());
         }
 
         try {
             filterChain.doFilter(request, response);
         } catch (Exception e) {
-            log.error("[JWT-FILTER] EXCEPTION from chain for {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage(), e);
+            log.error("[JWT] EXCEPTION from chain for {} {}: {}", request.getMethod(), request.getRequestURI(),
+                    e.getMessage(), e);
             throw e;
         }
 
         int status = response.getStatus();
-        log.warn("[JWT-FILTER] AFTER CHAIN status={} for {} {}",
-                status, request.getMethod(), request.getRequestURI());
+        if (status != 200) {
+            log.warn("[JWT] AFTER CHAIN status={} for {} {}", status, request.getMethod(), request.getRequestURI());
+        }
     }
 }
