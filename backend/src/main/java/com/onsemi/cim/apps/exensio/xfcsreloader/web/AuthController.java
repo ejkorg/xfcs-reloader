@@ -77,18 +77,26 @@ public class AuthController {
 
     /**
      * Silent SSO attempt for users with an active Exensio session.
-     * Attempts to obtain a token without user interaction.
+     * Redirects to Exensio auth service's /silent endpoint which performs
+     * an OIDC prompt=none check via Azure AD.
      */
     @GetMapping("/sso/silent")
-    public ResponseEntity<?> silentSso() {
+    public void silentSso(@RequestParam(value = "returnUrl", defaultValue = "/dashboard") String returnUrl,
+                          HttpServletResponse response) throws IOException {
         if (!ssoEnabled) {
-            return ResponseEntity.status(204).build();
+            response.setStatus(204);
+            return;
         }
-        
-        // In a real implementation, this would check if the user has a valid 
-        // Exensio session token (typically from secure cookies) and return it.
-        // For now, return 204 No Content to indicate no silent session available.
-        return ResponseEntity.status(204).build();
+
+        try {
+            String encodedReturnUrl = URLEncoder.encode(returnUrl, StandardCharsets.UTF_8);
+            String encodedCallbackApp = URLEncoder.encode(callbackUrl, StandardCharsets.UTF_8);
+            String redirectUrl = exensioAuthUrl + "/silent?returnUrl=" + encodedReturnUrl
+                    + "&callbackApp=" + encodedCallbackApp;
+            response.sendRedirect(redirectUrl);
+        } catch (Exception e) {
+            response.sendError(500, "Failed to initiate silent SSO: " + e.getMessage());
+        }
     }
 
     /**
@@ -168,7 +176,7 @@ public class AuthController {
             response.put("refreshed", false);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Refresh failed: " + e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to refresh token: " + e.getMessage()));
         }
     }
 
