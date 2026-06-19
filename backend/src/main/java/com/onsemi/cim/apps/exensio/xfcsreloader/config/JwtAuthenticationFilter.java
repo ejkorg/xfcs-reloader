@@ -67,6 +67,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             log.warn("[JWT-FILTER] Invalid token for {} {}", request.getMethod(), request.getRequestURI());
         }
 
-        filterChain.doFilter(request, response);
+        try {
+            filterChain.doFilter(request, response);
+        } catch (Exception e) {
+            log.error("[JWT-FILTER] EXCEPTION from chain for {} {}: {}", request.getMethod(), request.getRequestURI(), e.getMessage(), e);
+            throw e;
+        }
+
+        int status = response.getStatus();
+        log.warn("[JWT-FILTER] AFTER CHAIN status={} for {} {}",
+                status, request.getMethod(), request.getRequestURI());
     }
 }
