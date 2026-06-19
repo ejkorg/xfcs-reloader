@@ -1,7 +1,7 @@
 export const environment = {
   production: true,
   apiUrl: '/xfcs-reloader/api',
-  authUrl: '/exensio-reload/api/auth',
+  authUrl: '/xfcs-reloader/api/auth',
   featureFlags: {
     xfcsReloaderEnabled: true
   }
