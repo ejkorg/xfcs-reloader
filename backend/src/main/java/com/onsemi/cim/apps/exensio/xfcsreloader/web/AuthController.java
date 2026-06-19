@@ -1,10 +1,13 @@
 package com.onsemi.cim.apps.exensio.xfcsreloader.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.onsemi.cim.apps.exensio.xfcsreloader.config.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -181,14 +184,24 @@ public class AuthController {
     }
 
     /**
-     * Get current user info from JWT token in Authorization header.
+     * Get current user info from the JWT token in the Authorization header.
+     * Extracts username and roles from the SecurityContext (populated by JwtAuthenticationFilter).
      */
     @GetMapping("/me")
-    public ResponseEntity<?> getCurrentUser() {
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
         try {
+            if (authentication == null || !authentication.isAuthenticated()) {
+                return ResponseEntity.status(401).body(Map.of("error", "Not authenticated"));
+            }
+
             ObjectNode response = objectMapper.createObjectNode();
-            response.put("username", "current-user");
-            response.putArray("roles").add("USER");
+            response.put("username", authentication.getName());
+
+            ArrayNode roles = response.putArray("roles");
+            for (GrantedAuthority authority : authentication.getAuthorities()) {
+                roles.add(authority.getAuthority());
+            }
+
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             return ResponseEntity.status(401).body(Map.of("error", "Failed to get user info: " + e.getMessage()));
