@@ -9,7 +9,6 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
-import org.springframework.security.web.context.SecurityContextHolderFilter;
 
 import java.util.List;
 
@@ -28,8 +27,7 @@ public class JwtSecurityContextRepository implements SecurityContextRepository {
     }
 
     @Override
-    public SecurityContext loadContext(HttpRequestResponseHolder requestResponseHolder) {
-        HttpServletRequest request = requestResponseHolder.getRequest();
+    public SecurityContext loadContext(HttpServletRequest request) {
         String authHeader = request.getHeader("Authorization");
         String token = null;
 
