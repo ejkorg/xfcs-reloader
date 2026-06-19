@@ -49,7 +49,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             String username = jwtUtil.extractUsername(token);
-            List<SimpleGrantedAuthority> authorities = jwtUtil.extractRoles(token).stream()
+            List<String> rawRoles = jwtUtil.extractRoles(token);
+            log.debug("[JWT] User='{}' raw roles from JWT: {}", username, rawRoles);
+
+            if (rawRoles.isEmpty()) {
+                log.warn("[JWT] No roles found in token for user='{}'; defaulting to ROLE_USER", username);
+                rawRoles = List.of("USER");
+            }
+
+            List<SimpleGrantedAuthority> authorities = rawRoles.stream()
                     .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
                     .map(SimpleGrantedAuthority::new)
                     .toList();
@@ -57,7 +65,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(username, token, authorities);
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.debug("[JWT] Authenticated user='{}' roles={}", username, authorities);
+            log.info("[JWT] Authenticated user='{}' authorities={}", username, authorities);
         }
         // No Authorization header → continue unauthenticated (Spring Security handles 403 downstream)
 
