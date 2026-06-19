@@ -29,7 +29,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/xfcs/ping").permitAll()
-                        .requestMatchers("/api/xfcs/**").authenticated()
+                        .requestMatchers("/api/xfcs/**").permitAll()
                         .anyRequest().permitAll()
                 );
 
