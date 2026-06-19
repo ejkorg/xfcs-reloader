@@ -56,6 +56,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             log.info("[JWT] Authenticated user='{}' authorities={}", username, authorities);
         } else if (token != null) {
             log.warn("[JWT] Invalid token for {} {}", request.getMethod(), request.getRequestURI());
+        } else {
+            log.warn("[JWT] No Bearer token for {} {}", request.getMethod(), request.getRequestURI());
         }
 
         try {
