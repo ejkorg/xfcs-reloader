@@ -42,7 +42,10 @@ security:
     http://localhost:8080,
     http://usaz15ls088:8080,
     http://usaz15ls088:8005,
-    http://usaz15ls088
+    http://usaz15ls088,
+    https://usaz15ls088:8080,
+    https://usaz15ls088:8005,
+    https://usaz15ls088
 
 reloader:
   jwt:
