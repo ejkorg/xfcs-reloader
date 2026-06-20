@@ -368,7 +368,7 @@ public class ReloadPendingMonitor {
                                 terminal = true;
                             }
                         }
-                        case ERROR, FAILED -> {
+                        case ERROR -> {
                             long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
                             if (elapsed >= exensioProperties.getTimeoutMinutes()) {
                                 pf.setFileStatus("failed");
