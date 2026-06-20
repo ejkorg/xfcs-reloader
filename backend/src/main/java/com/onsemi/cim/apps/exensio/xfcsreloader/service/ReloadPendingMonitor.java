@@ -229,32 +229,43 @@ public class ReloadPendingMonitor {
                     }
 
                     if (foundStr.contains("/processed/") || foundStr.endsWith("/processed")) {
-                        String destination = detectDestinationFolder(foundStr);
-                        
+                        // Determine output destination from the --out path in the .cfg file.
+                        // The ETL writes output files to outboxPath/PRODUCTION/ or outboxPath/SANDBOX/.
+                        // We check which sub-folder contains a file whose name includes the input filename stem.
+                        String destination = detectDestinationFromOutbox(environment, pf.getFileName());
+
                         if (exensioProperties.isEnabled()) {
-                            pf.setFileStatus("exensio_loading");
-                            pf.setDestinationFolder(destination);
-                            pendingFileRepository.save(pf);
-                            
-                            String msg = destination == null
-                                ? ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") - waiting for Exensio confirmation")
-                                : ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Destination: " + destination + " - waiting for Exensio confirmation");
-                                
-                            appendEvent(pf.getSessionId(), "file_etl_completed", msg, pf.getRequester(), null);
-                            log.info("[PendingMonitor] ETL completed for: {}. Awaiting Exensio.", pf.getFileName());
-                            // Do not add to toRemove yet, wait for Exensio
+                            // Only transition to exensio_loading once — avoid spamming events on every scan cycle
+                            if (!"exensio_loading".equals(pf.getFileStatus())) {
+                                pf.setFileStatus("exensio_loading");
+                                pf.setDestinationFolder(destination);
+                                pendingFileRepository.save(pf);
+
+                                String schema = exensioProperties.resolvedDbschemaForDestination(destination);
+                                String msg = buildEtlProcessedMsg(pf, destination, schema, true);
+                                appendEvent(pf.getSessionId(), "file_etl_completed", msg, pf.getRequester(), null);
+
+                                sessionRepository.findById(pf.getSessionId()).ifPresent(sess -> {
+                                    if (!TERMINAL_STATUSES.contains(sess.getStatus() == null ? "" : sess.getStatus().toLowerCase())) {
+                                        sess.setMessage("ETL complete. Awaiting Exensio confirmation...");
+                                        sessionRepository.save(sess);
+                                    }
+                                });
+
+                                log.info("[PendingMonitor] ETL completed for: {} | destination={} schema={}. Awaiting Exensio.",
+                                        pf.getFileName(), destination, schema);
+                            }
+                            // Do not add to toRemove — wait for Exensio confirmation
                         } else {
                             pf.setFileStatus("completed");
-                            pf.setResolvedAt(java.time.Instant.now());
+                            pf.setResolvedAt(Instant.now());
                             pf.setDestinationFolder(destination);
                             pendingFileRepository.save(pf);
 
-                            String msg = destination == null
-                                ? ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ")")
-                                : ("ETL processed (Processed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Destination: " + destination);
-
+                            String schema = exensioProperties.resolvedDbschemaForDestination(destination);
+                            String msg = buildEtlProcessedMsg(pf, destination, schema, false);
                             appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
-                            log.info("[PendingMonitor] ETL completed for: {} (Lot: {})", pf.getFileName(), pf.getUserLotId());
+                            log.info("[PendingMonitor] ETL completed for: {} (Lot: {}) | destination={}", pf.getFileName(), pf.getUserLotId(), destination);
                             toRemove.add(pf.getAbsPath());
                             sessionsToFinalize.add(pf.getSessionId());
                         }
@@ -601,12 +612,72 @@ public class ReloadPendingMonitor {
         return trimmed.substring(0, 500) + "...";
     }
 
-    private String detectDestinationFolder(String path) {
-        if (path == null || path.isBlank()) return null;
-        String lower = path.replace("\\", "/").toLowerCase(Locale.ROOT);
-        if (lower.contains("/production/")) return "PRODUCTION";
-        if (lower.contains("/sandbox/")) return "SANDBOX";
+    /**
+     * Determines PRODUCTION or SANDBOX destination by looking in the --out directory
+     * (from the .cfg file for this environment) for an output file whose name contains
+     * the input filename stem (lot id portion before any extension).
+     *
+     * The ETL writes output files to:
+     *   outboxPath/PRODUCTION/<outputFile>   or
+     *   outboxPath/SANDBOX/<outputFile>
+     *
+     * We find which sub-folder has a file whose name includes the input file's stem.
+     * Falls back to null if the outbox path is unknown or neither folder has a match.
+     */
+    private String detectDestinationFromOutbox(String environment, String inputFileName) {
+        if (environment == null || inputFileName == null) return null;
+
+        EnvFolderResolver.EnvResolutionInfo res = envFolderResolver.resolveEnvDetails(environment);
+        if (res == null || res.outboxPath() == null || res.outboxPath().isBlank()) {
+            log.debug("[PendingMonitor] No --out path in .cfg for env='{}', cannot detect destination", environment);
+            return null;
+        }
+
+        String outbox = res.outboxPath().replace("\\", "/");
+        // Strip any trailing file-extension from the input name to get the stem for matching
+        // e.g. P002924307_FT_reloaded_20260620000911.LSR → P002924307_FT_reloaded_20260620000911
+        String stem = inputFileName;
+        int dotIdx = stem.lastIndexOf('.');
+        if (dotIdx > 0) stem = stem.substring(0, dotIdx);
+
+        for (String schema : List.of("PRODUCTION", "SANDBOX")) {
+            java.nio.file.Path schemaDir = java.nio.file.Paths.get(outbox, schema);
+            if (!java.nio.file.Files.isDirectory(schemaDir)) continue;
+            try {
+                final String stemFinal = stem;
+                boolean found = java.nio.file.Files.list(schemaDir)
+                        .anyMatch(p -> p.getFileName().toString().contains(stemFinal));
+                if (found) {
+                    log.info("[PendingMonitor] Detected destination='{}' for '{}' via outbox={}", schema, inputFileName, schemaDir);
+                    return schema;
+                }
+            } catch (Exception e) {
+                log.debug("[PendingMonitor] Error scanning outbox dir '{}': {}", schemaDir, e.getMessage());
+            }
+        }
+
+        log.debug("[PendingMonitor] No output file found for '{}' in outbox PRODUCTION/SANDBOX dirs under '{}'", inputFileName, outbox);
         return null;
+    }
+
+    /**
+     * Builds the event message for a file that has been ETL-processed (landed in Processed/).
+     * Always includes the destination schema so the UI can display it.
+     */
+    private String buildEtlProcessedMsg(ReloadPendingFileEntity pf, String destination, String schema, boolean awaitingExensio) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("ETL processed (Processed/): ").append(pf.getFileName())
+          .append(" (Lot: ").append(pf.getUserLotId()).append(")");
+        if (destination != null) {
+            sb.append(" | Destination: ").append(destination);
+        }
+        if (schema != null) {
+            sb.append(" | Schema: ").append(schema);
+        }
+        if (awaitingExensio) {
+            sb.append(" | Awaiting Exensio confirmation");
+        }
+        return sb.toString();
     }
 
     // ──────────────────────────────────────────────────────────────────────────

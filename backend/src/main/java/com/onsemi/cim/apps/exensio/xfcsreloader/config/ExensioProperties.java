@@ -33,8 +33,28 @@ public class ExensioProperties {
         return "PROD".equalsIgnoreCase(env) ? prodUrl : qaUrl;
     }
 
+    /**
+     * Effective dbname sent to POST /v1/session/login.
+     * Falls back to the env value if not explicitly configured, matching exensioreload behaviour.
+     */
     public String resolvedDbname() {
-        return dbname;
+        return (dbname != null && !dbname.isBlank()) ? dbname : env;
+    }
+
+    /**
+     * Maps a file destination folder (as detected by the pending monitor from the file path)
+     * to the Exensio dbschema that should be used when querying the API.
+     *
+     * The ETL writes files to either a Production/ or Sandbox/ sub-folder inside Processed/.
+     * That folder name IS the schema target — we do not infer it from the env config.
+     *
+     * Returns "PRODUCTION" or "SANDBOX"; defaults to "PRODUCTION" when destination is unknown.
+     */
+    public String resolvedDbschemaForDestination(String destination) {
+        if ("SANDBOX".equalsIgnoreCase(destination)) {
+            return "SANDBOX";
+        }
+        return "PRODUCTION";
     }
 
     // getters and setters

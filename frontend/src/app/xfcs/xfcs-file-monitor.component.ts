@@ -207,6 +207,7 @@ import { ToastService } from '../shared/services/toast.service';
     .file-status-badge { display: inline-flex; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.62rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
     .file-status-badge.pending   { color: var(--text-muted); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); }
     .file-status-badge.staging   { color: var(--accent-color); background: rgba(129,140,248,0.12); border: 1px solid rgba(129,140,248,0.25); }
+    .file-status-badge.etl_complete { color: #f59e0b; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); }
     .file-status-badge.completed { color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); }
     .file-status-badge.failed    { color: #ef4444; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); }
 
@@ -420,6 +421,8 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
         return file.resolvedAt ? 'Delivered' : 'Completed';
       case 'failed':
         return file.errorReason ? 'Rejected / Error' : 'Failed';
+      case 'etl_complete':
+        return 'ETL Complete';
       case 'staging':
         return 'Staged';
       default:
@@ -433,6 +436,12 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
         return 'staged';
       case 'pending':
         return 'created';
+      case 'etl_complete': {
+        const dest = (file.destinationFolder || '').toUpperCase();
+        if (dest === 'PRODUCTION') return 'ETL → PROD';
+        if (dest === 'SANDBOX')    return 'ETL → SANDBOX';
+        return 'ETL done';
+      }
       default:
         return file.fileStatus;
     }
@@ -445,6 +454,11 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
 
     if (file.fileStatus === 'staging') {
       return 'STAGED';
+    }
+
+    if (file.fileStatus === 'etl_complete') {
+      const destination = (file.destinationFolder || '').trim().toUpperCase();
+      return destination ? `ETL COMPLETE - AWAITING EXENSIO (${destination})` : 'ETL COMPLETE - AWAITING EXENSIO';
     }
 
     if (file.fileStatus === 'completed') {
@@ -563,6 +577,13 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
       const reason = this.extractReasonFromEventMessage(message);
       if (reason) row.errorReason = reason;
       row.resolvedAt = event.eventTime;
+    } else if (type === 'file_etl_completed') {
+      // ETL moved file to Processed/ — awaiting Exensio confirmation
+      if (this.statusRank(row.fileStatus) < this.statusRank('etl_complete')) {
+        row.fileStatus = 'etl_complete';
+      }
+      const destination = this.extractDestinationFromEventMessage(message);
+      if (destination) row.destinationFolder = destination.toUpperCase();
     } else if (type === 'file_completed') {
       // Distinguish staging-phase FILE_COMPLETED (uppercase in backend) from ETL terminal file_completed.
       if (rawType === 'FILE_COMPLETED') {
@@ -762,8 +783,10 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
   private statusRank(status: FileStatusItem['fileStatus']): number {
     switch (status) {
       case 'failed':
-        return 4;
+        return 5;
       case 'completed':
+        return 4;
+      case 'etl_complete':
         return 3;
       case 'staging':
         return 2;

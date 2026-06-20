@@ -11,18 +11,42 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Result of a batch lot-wafer lookup against the Exensio API.
+ *
+ * Response shape:
+ * <pre>
+ * {
+ *   "lots": [{
+ *     "lot_id": "P002924307",
+ *     "lot_key": 2776623,
+ *     "wafers": [{
+ *       "wafer_id": "KG01HK4X_06",
+ *       "wafer_key": 4633046,
+ *       "pg_key": 12345,
+ *       "ppid": "WS::CM8012X_..."
+ *     }]
+ *   }]
+ * }
+ * </pre>
+ *
+ * Lot matching uses the string {@code lot_id} field, not {@code lot_key} (which is a DB
+ * surrogate). The {@code userLotId} on the pending file entity is the same string the
+ * request was submitted with, so they match directly.
+ */
 public class BatchLookupResult {
+
     private static final Logger log = LoggerFactory.getLogger(BatchLookupResult.class);
 
     private final List<LotResult> lots;
     private final boolean success;
     private final String errorMessage;
 
-    public record LotResult(long lotKey, long pgKey, List<WaferResult> wafers) {
+    public record LotResult(String lotId, long lotKey, long pgKey, List<WaferResult> wafers) {
         public record WaferResult(String waferId, long waferKey, long pgKey, String ppid) {}
     }
 
-    public enum UpdateType { DONE, NOT_FOUND, ERROR, FAILED }
+    public enum UpdateType { DONE, NOT_FOUND, ERROR }
 
     public record RecordUpdate(String absPath, UpdateType type, Long waferKey, Long pgKey, String errorMessage) {}
 
@@ -38,74 +62,72 @@ public class BatchLookupResult {
         this.errorMessage = errorMessage;
     }
 
-    public boolean isSuccess() {
-        return success;
-    }
+    public boolean isSuccess() { return success; }
+    public String getErrorMessage() { return errorMessage; }
+    public List<LotResult> getLots() { return lots; }
 
-    public String getErrorMessage() {
-        return errorMessage;
-    }
+    /**
+     * Maps the API response back to per-file updates.
+     *
+     * Matching strategy (mirrors exensioreload BatchLookupResult):
+     * 1. Build a map of lot_id (string) → best wafer result (first with pg_key > 0).
+     * 2. For each pending file, look up its userLotId in that map.
+     * 3. DONE when found, NOT_FOUND when absent, ERROR when batch call itself failed.
+     */
+    public List<RecordUpdate> mapToRecordUpdates(List<ReloadPendingFileEntity> records) {
+        List<RecordUpdate> updates = new ArrayList<>();
 
-    public List<LotResult> getLots() {
-        return lots;
-    }
-
-    public List<RecordUpdate> mapToRecordUpdates(List<ReloadPendingFileEntity> originalRecords) {
         if (!success) {
-            List<RecordUpdate> updates = new ArrayList<>();
-            for (ReloadPendingFileEntity record : originalRecords) {
-                updates.add(new RecordUpdate(record.getAbsPath(), UpdateType.ERROR, null, null, errorMessage));
+            for (ReloadPendingFileEntity r : records) {
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, errorMessage));
             }
             return updates;
         }
 
-        Map<String, LotResult> lotLookup = new HashMap<>();
+        // lot_id string → best wafer result in this lot
+        Map<String, LotResult.WaferResult> byLotId = new HashMap<>();
+        Map<String, Long> lotPgKeyByLotId = new HashMap<>();
         for (LotResult lot : lots) {
-            lotLookup.put(String.valueOf(lot.lotKey()), lot);
-            // We just use the lot string as key assuming search uses string representation.
+            if (lot.lotId() == null || lot.lotId().isBlank()) continue;
+            String key = lot.lotId().toUpperCase();
+            // Keep lot-level pg_key as fallback when no wafers are present
+            if (lot.pgKey() > 0) {
+                lotPgKeyByLotId.put(key, lot.pgKey());
+            }
+            for (LotResult.WaferResult w : lot.wafers()) {
+                if (w.pgKey() > 0 && !byLotId.containsKey(key)) {
+                    byLotId.put(key, w);
+                }
+            }
         }
 
-        List<RecordUpdate> updates = new ArrayList<>();
-        for (ReloadPendingFileEntity record : originalRecords) {
-            String lot = record.getUserLotId();
+        for (ReloadPendingFileEntity r : records) {
+            String lotId = r.getUserLotId();
+            if (lotId == null || lotId.isBlank()) {
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, "Missing userLotId"));
+                continue;
+            }
 
-            if (lot != null) {
-                // In this implementation, the Exensio API returns matches 
-                // in the 'lots' array according to how they were submitted.
-                // We'll perform generic checking.
-                for (LotResult lr : lots) {
-                    if (String.valueOf(lr.lotKey()).equals(lot) || lotLookup.containsKey(lot)) {
-                        break;
-                    }
-                }
-                
-                // If not matched strictly by lotKey string matching the userLotId, 
-                // since XFCS userLotId might be an actual string and Exensio lotKey is a database ID,
-                // wait, in dtp-resender: lotIds.add(record.lot()); 
-                // Exensio returns `lot_key`, but wait, how do we correlate response back to the requested lot string?
-                // Actually dtp-resender matches by checking `lotLookup.get(String.valueOf(record.lot()))`!!
-                // Meaning Exensio `lot_key` string representation equals the input lot? Yes.
-                
-                LotResult lotResult = lotLookup.get(lot);
-                if (lotResult != null) {
-                    updates.add(new RecordUpdate(record.getAbsPath(), UpdateType.DONE, null, lotResult.pgKey(), null));
-                } else if (!lots.isEmpty() && isTargetLotPresent(lot, String.valueOf(lots.get(0).lotKey()))) {
-                    // Fallback matching if keys somehow mismatch but we know it's a success
-                    updates.add(new RecordUpdate(record.getAbsPath(), UpdateType.DONE, null, lots.get(0).pgKey(), null));
-                } else {
-                    updates.add(new RecordUpdate(record.getAbsPath(), UpdateType.NOT_FOUND, null, null, null));
-                }
+            String key = lotId.toUpperCase();
+            LotResult.WaferResult wafer = byLotId.get(key);
+            if (wafer != null) {
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.DONE,
+                        wafer.waferKey() > 0 ? wafer.waferKey() : null,
+                        wafer.pgKey(), null));
+            } else if (lotPgKeyByLotId.containsKey(key)) {
+                // Lot found but no wafers — still treat as DONE with lot-level pg_key
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.DONE,
+                        null, lotPgKeyByLotId.get(key), null));
             } else {
-                updates.add(new RecordUpdate(record.getAbsPath(), UpdateType.ERROR, null, null, "Record missing userLotId"));
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.NOT_FOUND, null, null, null));
             }
         }
         return updates;
     }
 
-    private boolean isTargetLotPresent(String target, String actual) {
-         return target != null && actual != null && target.equalsIgnoreCase(actual);
-    }
-
+    /**
+     * Parses the JSON response body from POST /v1/key/lot-wafer-lookup.
+     */
     public static BatchLookupResult parse(String jsonResponse, ObjectMapper objectMapper) {
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
@@ -117,32 +139,33 @@ public class BatchLookupResult {
 
             List<LotResult> lotResults = new ArrayList<>();
             for (JsonNode lotNode : lotsNode) {
-                long lotKey = lotNode.path("lot_key").asLong(0);
+                String lotId  = lotNode.path("lot_id").asText(null);
+                long lotKey   = lotNode.path("lot_key").asLong(0);
                 long lotPgKey = lotNode.path("pg_key").asLong(0);
                 JsonNode wafersNode = lotNode.path("wafers");
 
                 List<LotResult.WaferResult> waferResults = new ArrayList<>();
                 if (wafersNode.isArray()) {
-                    for (JsonNode waferNode : wafersNode) {
-                        String waferId = waferNode.path("wafer_id").asText(null);
-                        long waferKey = waferNode.path("wafer_key").asLong(0);
-                        long pgKey = waferNode.path("pg_key").asLong(0);
-                        String ppid = waferNode.path("ppid").asText(null);
-
+                    for (JsonNode w : wafersNode) {
+                        String waferId  = w.path("wafer_id").asText(null);
+                        long waferKey   = w.path("wafer_key").asLong(0);
+                        long pgKey      = w.path("pg_key").asLong(0);
+                        String ppid     = w.path("ppid").asText(null);
                         if (waferId != null && waferKey > 0) {
                             waferResults.add(new LotResult.WaferResult(waferId, waferKey, pgKey, ppid));
                         }
                     }
                 }
 
-                if (lotKey > 0 || lotPgKey > 0) {
-                    lotResults.add(new LotResult(lotKey, lotPgKey, waferResults));
+                if (lotId != null || lotKey > 0 || lotPgKey > 0) {
+                    lotResults.add(new LotResult(lotId, lotKey, lotPgKey, waferResults));
                 }
             }
+
             return new BatchLookupResult(lotResults);
 
         } catch (Exception e) {
-            log.warn("Failed to parse batch lookup response: {}", e.getMessage());
+            log.warn("Failed to parse Exensio batch lookup response: {}", e.getMessage());
             return new BatchLookupResult("Parse error: " + e.getMessage());
         }
     }

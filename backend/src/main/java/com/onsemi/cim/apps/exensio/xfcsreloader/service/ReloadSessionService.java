@@ -188,7 +188,8 @@ public class ReloadSessionService {
         for (ReloadSessionEventEntity ev : events) {
             String rawEventType = ev.getEventType() == null ? "" : ev.getEventType().trim();
             String eventType = rawEventType.toLowerCase(Locale.ROOT);
-            if (!("file_completed".equals(eventType) || "file_failed".equals(eventType) || "file_staging".equals(eventType))) {
+            if (!("file_completed".equals(eventType) || "file_failed".equals(eventType)
+                    || "file_staging".equals(eventType) || "file_etl_completed".equals(eventType))) {
                 continue;
             }
 
@@ -219,6 +220,7 @@ public class ReloadSessionService {
                 }
                 case "file_failed" -> "failed";
                 case "file_staging" -> "staging";
+                case "file_etl_completed" -> "etl_complete";
                 default -> target.fileStatus;
             };
 
@@ -558,8 +560,9 @@ public class ReloadSessionService {
     private int statusRank(String status) {
         if (status == null) return 0;
         return switch (status.toLowerCase(Locale.ROOT)) {
-            case "failed" -> 4;
-            case "completed" -> 3;
+            case "failed" -> 5;
+            case "completed" -> 4;
+            case "etl_complete" -> 3;
             case "staging" -> 2;
             case "pending", "created" -> 1;
             default -> 0;
@@ -574,7 +577,8 @@ public class ReloadSessionService {
         if ("completed".equals(state)) {
             for (MutableFileStatus m : files) {
                 if (m == null) continue;
-                if ("pending".equalsIgnoreCase(m.fileStatus) || "staging".equalsIgnoreCase(m.fileStatus)) {
+                if ("pending".equalsIgnoreCase(m.fileStatus) || "staging".equalsIgnoreCase(m.fileStatus)
+                        || "etl_complete".equalsIgnoreCase(m.fileStatus)) {
                     m.fileStatus = "completed";
                     if (m.resolvedAt == null) m.resolvedAt = terminalTime;
                 }
@@ -592,6 +596,8 @@ public class ReloadSessionService {
                     }
                     if (m.resolvedAt == null) m.resolvedAt = terminalTime;
                 }
+                // etl_complete files that didn't get Exensio confirmation should stay as etl_complete
+                // (not regressed to failed) unless the session truly failed for a known reason.
             }
         }
     }
@@ -792,7 +798,10 @@ public class ReloadSessionService {
         // Important: "Done" must reflect ETL-resolved outcomes, not just staging completion.
         // Staging events are "FILE_COMPLETED"/"FILE_FAILED" (emitted immediately after moving into inbox root),
         // while ETL resolution is "file_completed"/"file_failed" (emitted by the pending-file monitor).
-        int completedFiles = (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_completed");
+        // "file_etl_completed" means ETL is done but Exensio confirmation is still pending — count these
+        // as part of done so the UI progress bar reflects real work done.
+        int completedFiles = (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_completed")
+                + (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_etl_completed");
         int failedFiles = (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_failed");
 
         List<String> filePaths = Collections.emptyList();
