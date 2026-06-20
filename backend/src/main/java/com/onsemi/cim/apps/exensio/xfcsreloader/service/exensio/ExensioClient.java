@@ -191,7 +191,6 @@ public class ExensioClient {
                     .timeout(Duration.ofSeconds(30))
                     .header("Authorization", "Bearer " + token)
                     .header("Content-Type", "application/json")
-                    .header("Connection", "Close")
                     .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
                     .build();
 

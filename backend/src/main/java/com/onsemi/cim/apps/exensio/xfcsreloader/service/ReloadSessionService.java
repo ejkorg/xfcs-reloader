@@ -189,7 +189,8 @@ public class ReloadSessionService {
             String rawEventType = ev.getEventType() == null ? "" : ev.getEventType().trim();
             String eventType = rawEventType.toLowerCase(Locale.ROOT);
             if (!("file_completed".equals(eventType) || "file_failed".equals(eventType)
-                    || "file_staging".equals(eventType) || "file_etl_completed".equals(eventType))) {
+                    || "file_staging".equals(eventType) || "file_etl_completed".equals(eventType)
+                    || "file_unverified".equals(eventType))) {
                 continue;
             }
 
@@ -218,8 +219,9 @@ public class ReloadSessionService {
                     }
                     yield "completed";
                 }
-                case "file_failed" -> "failed";
-                case "file_staging" -> "staging";
+                case "file_failed"      -> "failed";
+                case "file_unverified"  -> "unverified";
+                case "file_staging"     -> "staging";
                 case "file_etl_completed" -> "etl_complete";
                 default -> target.fileStatus;
             };
@@ -560,10 +562,11 @@ public class ReloadSessionService {
     private int statusRank(String status) {
         if (status == null) return 0;
         return switch (status.toLowerCase(Locale.ROOT)) {
-            case "failed" -> 5;
-            case "completed" -> 4;
+            case "failed"      -> 5;
+            case "completed"   -> 4;
+            case "unverified"  -> 4; // terminal like completed — ETL done, Exensio unconfirmed
             case "etl_complete" -> 3;
-            case "staging" -> 2;
+            case "staging"     -> 2;
             case "pending", "created" -> 1;
             default -> 0;
         };
@@ -582,6 +585,7 @@ public class ReloadSessionService {
                     m.fileStatus = "completed";
                     if (m.resolvedAt == null) m.resolvedAt = terminalTime;
                 }
+                // unverified stays unverified — it carries a specific meaning for the user
             }
             return;
         }
@@ -596,8 +600,7 @@ public class ReloadSessionService {
                     }
                     if (m.resolvedAt == null) m.resolvedAt = terminalTime;
                 }
-                // etl_complete files that didn't get Exensio confirmation should stay as etl_complete
-                // (not regressed to failed) unless the session truly failed for a known reason.
+                // etl_complete and unverified keep their status — already resolved
             }
         }
     }
@@ -795,13 +798,13 @@ public class ReloadSessionService {
         String sessionId = entity.getSessionId();
         int totalFiles = Optional.ofNullable(entity.getFileCount()).orElse(0);
         
-        // Important: "Done" must reflect ETL-resolved outcomes, not just staging completion.
-        // Staging events are "FILE_COMPLETED"/"FILE_FAILED" (emitted immediately after moving into inbox root),
-        // while ETL resolution is "file_completed"/"file_failed" (emitted by the pending-file monitor).
-        // "file_etl_completed" means ETL is done but Exensio confirmation is still pending — count these
-        // as part of done so the UI progress bar reflects real work done.
+        // "Done" = ETL resolved outcomes. Includes:
+        // - file_completed: confirmed loaded in Exensio
+        // - file_etl_completed: ETL done, awaiting Exensio confirmation
+        // - file_unverified: ETL done but Exensio check failed/timed out — user must verify manually
         int completedFiles = (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_completed")
-                + (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_etl_completed");
+                + (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_etl_completed")
+                + (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_unverified");
         int failedFiles = (int) reloadSessionEventRepository.countBySessionIdAndEventType(sessionId, "file_failed");
 
         List<String> filePaths = Collections.emptyList();

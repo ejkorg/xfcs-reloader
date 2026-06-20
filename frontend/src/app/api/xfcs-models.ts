@@ -102,7 +102,7 @@ export interface FileStatusItem {
   fileName: string;
   originalFileName?: string;
   userLotId?: string;
-  fileStatus: 'pending' | 'staging' | 'etl_complete' | 'completed' | 'failed';
+  fileStatus: 'pending' | 'staging' | 'etl_complete' | 'completed' | 'unverified' | 'failed';
   errorReason?: string;
   resolvedPath?: string;
   destinationFolder?: string;

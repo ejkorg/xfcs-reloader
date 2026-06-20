@@ -353,29 +353,49 @@ public class ReloadPendingMonitor {
                             pf.setResolvedAt(Instant.now());
                             pf.setExensioWaferKey(update.waferKey());
                             pf.setExensioPgKey(update.pgKey());
-                            String msg = "Loaded in Exensio: " + pf.getFileName() + " (pgKey=" + update.pgKey() + ")";
+                            String dest = pf.getDestinationFolder() != null ? " [" + pf.getDestinationFolder() + "]" : "";
+                            String msg = "Loaded in Exensio" + dest + ": " + pf.getFileName()
+                                    + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey() + ")";
                             appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            log.info("[PendingMonitor] Exensio confirmed: {}", pf.getFileName());
                             terminal = true;
                         }
                         case NOT_FOUND -> {
                             long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
                             if (elapsed >= exensioProperties.getTimeoutMinutes()) {
-                                pf.setFileStatus("failed");
+                                // ETL succeeded (file is in Processed/) but Exensio hasn't picked it up
+                                // within the timeout window. Mark as unverified — not failed — because
+                                // the ETL work itself completed. The user should verify manually.
+                                pf.setFileStatus("unverified");
                                 pf.setResolvedAt(Instant.now());
-                                pf.setErrorReason("Exensio load timeout — not found after " + exensioProperties.getTimeoutMinutes() + " mins");
-                                String msg = "Failed to load in Exensio (Timeout): " + pf.getFileName();
-                                appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "EXENSIO_TIMEOUT");
+                                pf.setErrorReason("Not found in Exensio after " + exensioProperties.getTimeoutMinutes()
+                                        + " min. ETL completed — please verify in Exensio manually.");
+                                String msg = "ETL complete but not yet confirmed in Exensio: " + pf.getFileName()
+                                        + " (Lot: " + pf.getUserLotId() + ")"
+                                        + " | Destination: " + (pf.getDestinationFolder() != null ? pf.getDestinationFolder() : "unknown")
+                                        + " | Please verify in Exensio manually.";
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND");
+                                log.warn("[PendingMonitor] Exensio timeout for: {} — marking unverified", pf.getFileName());
                                 terminal = true;
                             }
                         }
                         case ERROR -> {
                             long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
                             if (elapsed >= exensioProperties.getTimeoutMinutes()) {
-                                pf.setFileStatus("failed");
+                                // Exensio API is unavailable or erroring. The ETL completed
+                                // successfully — don't penalise the user with a failed status.
+                                // Mark unverified and ask for manual verification.
+                                pf.setFileStatus("unverified");
                                 pf.setResolvedAt(Instant.now());
-                                pf.setErrorReason("Exensio API Error: " + update.errorMessage());
-                                String msg = "Exensio API error for " + pf.getFileName() + ": " + update.errorMessage();
-                                appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "EXENSIO_ERROR");
+                                pf.setErrorReason("Exensio API error: " + update.errorMessage()
+                                        + ". ETL completed — please verify in Exensio manually.");
+                                String msg = "ETL complete but Exensio API check failed: " + pf.getFileName()
+                                        + " (Lot: " + pf.getUserLotId() + ")"
+                                        + " | Destination: " + (pf.getDestinationFolder() != null ? pf.getDestinationFolder() : "unknown")
+                                        + " | API error: " + update.errorMessage()
+                                        + " | Please verify in Exensio manually.";
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR");
+                                log.warn("[PendingMonitor] Exensio API error for: {} — marking unverified", pf.getFileName());
                                 terminal = true;
                             }
                         }
@@ -470,21 +490,25 @@ public class ReloadPendingMonitor {
             long remaining = pendingFileRepository.countBySessionId(sessionId);
             if (remaining == 0) {
                 List<ReloadSessionEventEntity> events = eventRepository.findBySessionId(sessionId);
-                boolean hasFailure = events.stream()
-                        .anyMatch(e -> "file_failed".equalsIgnoreCase(e.getEventType()));
-                boolean hasCompleted = events.stream()
-                        .anyMatch(e -> "file_completed".equalsIgnoreCase(e.getEventType()));
+                boolean hasFailure    = events.stream().anyMatch(e -> "file_failed".equalsIgnoreCase(e.getEventType()));
+                boolean hasCompleted  = events.stream().anyMatch(e -> "file_completed".equalsIgnoreCase(e.getEventType()));
+                boolean hasUnverified = events.stream().anyMatch(e -> "file_unverified".equalsIgnoreCase(e.getEventType()));
 
                 String finalStatus;
                 String finalMessage;
-                if (hasFailure && hasCompleted) {
-                    finalStatus = "partially_failed";
+                if (hasFailure && (hasCompleted || hasUnverified)) {
+                    finalStatus  = "partially_failed";
                     finalMessage = "Completed with partial failures";
                 } else if (hasFailure) {
-                    finalStatus = "failed";
+                    finalStatus  = "failed";
                     finalMessage = "Completed with failures";
+                } else if (hasUnverified) {
+                    // ETL succeeded for all files but some could not be confirmed in Exensio.
+                    // Treat as completed with a warning — not failed.
+                    finalStatus  = "completed";
+                    finalMessage = "ETL complete. Some files could not be verified in Exensio — please verify manually.";
                 } else {
-                    finalStatus = "completed";
+                    finalStatus  = "completed";
                     finalMessage = "All files processed successfully";
                 }
 
