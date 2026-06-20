@@ -68,13 +68,11 @@ public class ExensioAuthService {
                 return token;
             }
 
-            String url = props.resolvedBaseUrl().replaceAll("/$", "") + "/v1/session/login";
+            String url = props.resolvedBaseUrl().replaceAll("/$", "") + "/v1/auth/login";
 
             ObjectNode body = objectMapper.createObjectNode();
             body.put("username", props.getUsername());
             body.put("password", props.getPassword());
-            body.put("dbname", props.resolvedDbname());
-            body.put("dbschema", schema);
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -119,7 +117,7 @@ public class ExensioAuthService {
         if (!props.isConfigured()) return;
         cachedTokens.forEach((schema, token) -> {
             try {
-                String url = props.resolvedBaseUrl().replaceAll("/$", "") + "/v1/session/logout";
+                String url = props.resolvedBaseUrl().replaceAll("/$", "") + "/v1/auth/logout";
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(url))
                         .timeout(Duration.ofSeconds(5))

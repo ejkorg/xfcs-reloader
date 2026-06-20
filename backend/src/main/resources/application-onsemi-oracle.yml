@@ -20,6 +20,20 @@ spring:
           starttls:
             enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:false}
 
+exensio:
+  enabled: true
+  env: ${EXENSIO_ENV:QA}
+  # Base URL must NOT include /v1 — the client appends /v1/session/login itself.
+  # Correct: https://api-prod.canyon.aws.pdf.com/api
+  # Wrong:   https://api-prod.canyon.aws.pdf.com/api/v1/  ← causes double /v1/ and 303
+  qa-url: ${EXENSIO_QA_URL:https://exnqa.onsemi.com/api}
+  prod-url: ${EXENSIO_PROD_URL:https://api-prod.canyon.aws.pdf.com/api}
+  username: ${EXENSIO_USERNAME:}
+  password: ${EXENSIO_PASSWORD:}
+  dbname: ${EXENSIO_DBNAME:}
+  timeout-minutes: ${EXENSIO_TIMEOUT_MINUTES:60}
+  poll-interval-ms: ${EXENSIO_POLL_INTERVAL_MS:60000}
+
 xfcs:
   archives-root: /export/home/dpower/archives
   notification-email-enabled: ${XFCS_NOTIFICATION_EMAIL_ENABLED:true}
