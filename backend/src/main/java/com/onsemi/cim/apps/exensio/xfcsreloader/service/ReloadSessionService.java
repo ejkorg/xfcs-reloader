@@ -220,7 +220,7 @@ public class ReloadSessionService {
                     yield "completed";
                 }
                 case "file_failed"      -> "failed";
-                case "file_unverified"  -> "unverified";
+                case "file_unverified"  -> "unverified-exensio";
                 case "file_staging"     -> "staging";
                 case "file_etl_completed" -> "etl_complete";
                 default -> target.fileStatus;
@@ -564,7 +564,7 @@ public class ReloadSessionService {
         return switch (status.toLowerCase(Locale.ROOT)) {
             case "failed"      -> 5;
             case "completed"   -> 4;
-            case "unverified"  -> 4; // terminal like completed — ETL done, Exensio unconfirmed
+            case "unverified-exensio"  -> 4; // terminal like completed — ETL done, Exensio unconfirmed
             case "etl_complete" -> 3;
             case "staging"     -> 2;
             case "pending", "created" -> 1;

@@ -55,6 +55,7 @@ public class ExensioClient {
         this.props = props;
         this.authService = authService;
         this.httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         this.objectMapper = objectMapper;

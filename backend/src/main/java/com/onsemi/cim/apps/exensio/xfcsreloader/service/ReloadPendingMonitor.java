@@ -366,7 +366,7 @@ public class ReloadPendingMonitor {
                                 // ETL succeeded (file is in Processed/) but Exensio hasn't picked it up
                                 // within the timeout window. Mark as unverified — not failed — because
                                 // the ETL work itself completed. The user should verify manually.
-                                pf.setFileStatus("unverified");
+                                pf.setFileStatus("unverified-exensio");
                                 pf.setResolvedAt(Instant.now());
                                 pf.setErrorReason("Not found in Exensio after " + exensioProperties.getTimeoutMinutes()
                                         + " min. ETL completed — please verify in Exensio manually.");
@@ -385,7 +385,7 @@ public class ReloadPendingMonitor {
                                 // Exensio API is unavailable or erroring. The ETL completed
                                 // successfully — don't penalise the user with a failed status.
                                 // Mark unverified and ask for manual verification.
-                                pf.setFileStatus("unverified");
+                                pf.setFileStatus("unverified-exensio");
                                 pf.setResolvedAt(Instant.now());
                                 pf.setErrorReason("Exensio API error: " + update.errorMessage()
                                         + ". ETL completed — please verify in Exensio manually.");

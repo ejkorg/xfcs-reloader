@@ -34,7 +34,13 @@ public class ExensioAuthService {
 
     public ExensioAuthService(ExensioProperties props, ObjectMapper objectMapper) {
         this.props = props;
-        this.httpClient = HttpClient.newBuilder().build();
+        // NEVER_REDIRECT: a 3xx from the login endpoint means something is wrong with the
+        // URL or server config (e.g. HTTP→HTTPS redirect, or a proxy login page).
+        // We want to see and report the actual status code, not silently follow the redirect.
+        this.httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
         this.objectMapper = objectMapper;
     }
 
@@ -80,8 +86,13 @@ public class ExensioAuthService {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                log.warn("Exensio login failed for schema {}: HTTP {} -> {}", schema, response.statusCode(), response.body());
-                throw new ExensioAuthException("Exensio login failed with HTTP " + response.statusCode());
+                String location = response.headers().firstValue("Location").orElse(null);
+                String detail = location != null
+                        ? "HTTP " + response.statusCode() + " → redirected to: " + location
+                          + " (check exensio.qa-url/prod-url — may need HTTPS or different path)"
+                        : "HTTP " + response.statusCode() + " → " + response.body();
+                log.warn("Exensio login failed for schema={}: {}", schema, detail);
+                throw new ExensioAuthException("Exensio login failed: " + detail);
             }
 
             JsonNode json = objectMapper.readTree(response.body());

@@ -78,7 +78,7 @@ import { ToastService } from '../shared/services/toast.service';
               <td>
                 <div class="status-cell">
                   <span class="file-status-badge" [class]="f.fileStatus">{{ statusBadgeLabel(f) }}</span>
-                  <div class="status-detail" [class.error-text]="f.fileStatus === 'failed' || f.fileStatus === 'unverified'">{{ statusDetailText(f) }}</div>
+                  <div class="status-detail" [class.error-text]="f.fileStatus === 'failed' || f.fileStatus === 'unverified-exensio'">{{ statusDetailText(f) }}</div>
                 </div>
               </td>
               <td class="text-sm text-muted">{{ fileEventLabel(f) }}</td>
@@ -209,7 +209,7 @@ import { ToastService } from '../shared/services/toast.service';
     .file-status-badge.staging   { color: var(--accent-color); background: rgba(129,140,248,0.12); border: 1px solid rgba(129,140,248,0.25); }
     .file-status-badge.etl_complete { color: #f59e0b; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.3); }
     .file-status-badge.completed { color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); }
-    .file-status-badge.unverified { color: #fb923c; background: rgba(251,146,60,0.1); border: 1px solid rgba(251,146,60,0.3); }
+    .file-status-badge.unverified-exensio { color: #fb923c; background: rgba(251,146,60,0.1); border: 1px solid rgba(251,146,60,0.3); }
     .file-status-badge.failed    { color: #ef4444; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); }
 
     .env-badge { display: inline-flex; padding: 0.15rem 0.6rem; border-radius: 6px; font-size: 0.7rem; font-weight: 800; background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.25); color: var(--accent-color); text-transform: uppercase; letter-spacing: 0.02em; }
@@ -420,7 +420,7 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
     switch (file.fileStatus) {
       case 'completed':
         return file.resolvedAt ? 'Delivered' : 'Completed';
-      case 'unverified':
+      case 'unverified-exensio':
         return 'Verify in Exensio';
       case 'failed':
         return file.errorReason ? 'Rejected / Error' : 'Failed';
@@ -445,7 +445,7 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
         if (dest === 'SANDBOX')    return 'ETL → SANDBOX';
         return 'ETL done';
       }
-      case 'unverified':
+      case 'unverified-exensio':
         return 'verify manually';
       default:
         return file.fileStatus;
@@ -466,7 +466,7 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
       return destination ? `ETL COMPLETE - AWAITING EXENSIO (${destination})` : 'ETL COMPLETE - AWAITING EXENSIO';
     }
 
-    if (file.fileStatus === 'unverified') {
+    if (file.fileStatus === 'unverified-exensio') {
       const destination = (file.destinationFolder || '').trim().toUpperCase();
       const dest = destination ? ` [${destination}]` : '';
       return `ETL COMPLETE${dest} - NOT VERIFIED IN EXENSIO - PLEASE VERIFY MANUALLY`;
@@ -589,7 +589,7 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
       if (reason) row.errorReason = reason;
       row.resolvedAt = event.eventTime;
     } else if (type === 'file_unverified') {
-      row.fileStatus = 'unverified';
+      row.fileStatus = 'unverified-exensio';
       const reason = this.extractReasonFromEventMessage(message);
       if (reason) row.errorReason = reason;
       row.resolvedAt = event.eventTime;
@@ -803,7 +803,7 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
       case 'failed':
         return 5;
       case 'completed':
-      case 'unverified':   // terminal — ETL done, Exensio unconfirmed
+      case 'unverified-exensio':   // terminal — ETL done, Exensio unconfirmed
         return 4;
       case 'etl_complete':
         return 3;
