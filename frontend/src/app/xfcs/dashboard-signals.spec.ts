@@ -2,11 +2,12 @@ import * as fc from 'fast-check';
 import { ReloadStatus } from '../api/xfcs-models';
 
 /**
- * Pure helper that mirrors the active-sessions filter in XfcsDashboardComponent.loadDashboard():
- *   sessions.filter(s => s.status === 'processing' || s.status === 'created')
+ * Pure helper that mirrors the active-sessions filter in XfcsDashboardComponent:
+ *   exclude terminal statuses (completed, failed, partially_failed, cancelled)
  */
 function filterActiveSessions(sessions: ReloadStatus[]): ReloadStatus[] {
-  return sessions.filter(s => s.status === 'processing' || s.status === 'created');
+  const terminal = new Set(['completed', 'failed', 'partially_failed', 'cancelled']);
+  return sessions.filter(s => !terminal.has(s.status?.toLowerCase()));
 }
 
 /**
@@ -35,9 +36,9 @@ function resolveLastUpdated(
 // Arbitraries
 // ---------------------------------------------------------------------------
 
-const ACTIVE_STATUSES = ['processing', 'created'] as const;
-const INACTIVE_STATUSES = ['completed', 'failed', 'cancelled'] as const;
-const ALL_STATUSES = [...ACTIVE_STATUSES, ...INACTIVE_STATUSES] as const;
+const ACTIVE_STATUSES = ['created', 'processing', 'queued', 'staging', 'pending'] as const;
+const TERMINAL_STATUSES = ['completed', 'failed', 'partially_failed', 'cancelled'] as const;
+const ALL_STATUSES = [...ACTIVE_STATUSES, ...TERMINAL_STATUSES] as const;
 
 const arbStatus = fc.constantFrom(...ALL_STATUSES);
 
@@ -61,39 +62,42 @@ const arbReloadStatus = (statusArb = arbStatus): fc.Arbitrary<ReloadStatus> =>
 
 describe('XfcsDashboardComponent — Property 3: Active sessions filter', () => {
 
-  it('Property 3: only processing/created sessions appear in activeSessions', () => {
+  it('Property 3: only non-terminal sessions appear in activeSessions', () => {
     fc.assert(
       fc.property(
         fc.array(arbReloadStatus(), { minLength: 0, maxLength: 30 }),
         (sessions) => {
           const active = filterActiveSessions(sessions);
-          return active.every(s => s.status === 'processing' || s.status === 'created');
+          const terminal = new Set(['completed', 'failed', 'partially_failed', 'cancelled']);
+          return active.every(s => !terminal.has(s.status));
         }
       ),
       { numRuns: 200 }
     );
   });
 
-  it('Property 3: no completed/failed/cancelled sessions appear in activeSessions', () => {
+  it('Property 3: no completed/failed/partially_failed/cancelled sessions appear in activeSessions', () => {
     fc.assert(
       fc.property(
         fc.array(arbReloadStatus(), { minLength: 0, maxLength: 30 }),
         (sessions) => {
           const active = filterActiveSessions(sessions);
-          return active.every(s => s.status !== 'completed' && s.status !== 'failed' && s.status !== 'cancelled');
+          const terminal = new Set(['completed', 'failed', 'partially_failed', 'cancelled']);
+          return active.every(s => !terminal.has(s.status));
         }
       ),
       { numRuns: 200 }
     );
   });
 
-  it('Property 3: all processing/created sessions from input are included in activeSessions', () => {
+  it('Property 3: all non-terminal sessions from input are included in activeSessions', () => {
     fc.assert(
       fc.property(
         fc.array(arbReloadStatus(), { minLength: 0, maxLength: 30 }),
         (sessions) => {
+          const terminal = new Set(['completed', 'failed', 'partially_failed', 'cancelled']);
           const expectedIds = sessions
-            .filter(s => s.status === 'processing' || s.status === 'created')
+            .filter(s => !terminal.has(s.status?.toLowerCase()))
             .map(s => s.sessionId);
           const active = filterActiveSessions(sessions);
           const activeIds = active.map(s => s.sessionId);

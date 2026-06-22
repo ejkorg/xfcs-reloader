@@ -1,0 +1,196 @@
+<div class="dashboard-root">
+  <header class="dashboard-header">
+    <div class="title-group">
+      <h1>xFCS <span class="accent">Reloader Dashboard</span></h1>
+      <p class="subtitle">System health and recent archival activity overview.</p>
+      <p class="last-updated" *ngIf="lastUpdated()">
+        Last updated: {{ lastUpdated() | date:'medium' }}
+      </p>
+    </div>
+    <div class="header-actions">
+      <app-glass-button routerLink="/reload/new" variant="primary">
+        <app-glass-icon name="add" [size]="18" color="default"></app-glass-icon>
+        New Reload Request
+      </app-glass-button>
+    </div>
+  </header>
+
+  <!-- KPI Section -->
+  <section class="stats-section mb-6">
+    <app-xfcs-stats [dashboard]="data()" [loading]="loading()"></app-xfcs-stats>
+  </section>
+
+  <div class="dashboard-grid">
+    <!-- Left Column -->
+    <div class="left-column">
+      <!-- Active Sessions Panel -->
+      <section class="glass-panel sessions-panel">
+        <div class="panel-header">
+          <app-glass-icon name="sync" color="primary"></app-glass-icon>
+          <h3>Active <span class="accent">Sessions</span></h3>
+        </div>
+
+        @if (loadingSessions()) {
+          <div class="skeleton-panel">
+            <div class="skeleton-row" *ngFor="let _ of [1,2,3]">
+              <div class="skeleton skeleton-line w-20"></div>
+              <div class="skeleton skeleton-line w-15"></div>
+              <div class="skeleton skeleton-line w-25"></div>
+              <div class="skeleton skeleton-line w-35"></div>
+            </div>
+          </div>
+        } @else if (sessionsError()) {
+          <div class="panel-error" role="alert">
+            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <p>{{ sessionsError() }}</p>
+            <app-glass-button variant="tertiary" size="small" (clicked)="retrySessions()">
+              Retry
+            </app-glass-button>
+          </div>
+        } @else if (activeSessions().length) {
+          <div class="session-list" role="list" aria-label="Active reload sessions">
+            <div class="session-row" *ngFor="let s of activeSessions(); trackBy: trackBySessionId" role="listitem">
+              <span class="session-id">{{ s.sessionId.slice(0, 8) }}</span>
+              <span class="env-badge">{{ s.environment ?? '—' }}</span>
+              <span class="requester">{{ s.requester ?? '—' }}</span>
+              <div class="progress-wrap">
+                <div class="progress-bar" role="progressbar" [attr.aria-valuenow]="sessionProgress(s)" aria-valuemin="0" aria-valuemax="100">
+                  <div class="progress-fill" [style.width.%]="sessionProgress(s)"></div>
+                </div>
+                <span class="progress-pct">{{ sessionProgress(s) }}%</span>
+              </div>
+              <span class="status-badge" [class]="statusClass(s.status)">{{ s.status }}</span>
+            </div>
+          </div>
+        } @else {
+          <div class="empty-state">No active sessions — system is idle.</div>
+        }
+
+        <div class="panel-footer">
+          <a routerLink="/history" class="footer-link">View All Sessions →</a>
+        </div>
+      </section>
+
+      <!-- Recent Lots Feed -->
+      <section class="glass-panel feed-panel">
+        <div class="panel-header">
+          <app-glass-icon name="history" color="primary"></app-glass-icon>
+          <h3>Recent <span class="accent">Extracted Lots</span></h3>
+        </div>
+
+        @if (loadingLots()) {
+          <div class="skeleton-panel">
+            <div class="skeleton-row" *ngFor="let _ of [1,2,3,4]">
+              <div class="skeleton skeleton-circle"></div>
+              <div class="skeleton skeleton-line w-40"></div>
+              <div class="skeleton skeleton-line w-15"></div>
+            </div>
+          </div>
+        } @else if (lotsError()) {
+          <div class="panel-error" role="alert">
+            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <p>{{ lotsError() }}</p>
+            <app-glass-button variant="tertiary" size="small" (clicked)="retryDashboard()">
+              Retry
+            </app-glass-button>
+          </div>
+        } @else if (data()?.recentLots?.length) {
+          <div class="lot-list" role="list" aria-label="Recently extracted lots">
+            <div class="lot-item" *ngFor="let lot of data()?.recentLots?.slice(0, 8); let i = index; trackBy: trackByLot"
+                 [style.animation-delay]="i * 0.05 + 's'" role="listitem">
+              <div class="lot-icon">
+                <app-glass-icon name="inventory_2" [size]="18" color="muted"></app-glass-icon>
+              </div>
+              <div class="lot-name">{{ lot }}</div>
+              <div class="lot-badge">Extracted</div>
+            </div>
+          </div>
+        } @else {
+          <div class="empty-state">No recent lot activity.</div>
+        }
+
+        <div class="panel-footer">
+          <a routerLink="/history" class="footer-link">View Full History →</a>
+        </div>
+      </section>
+    </div>
+
+    <!-- Right Column -->
+    <div class="right-column">
+      <!-- Quick Actions Panel -->
+      <section class="glass-panel actions-panel">
+        <div class="panel-header">
+          <app-glass-icon name="dashboard" color="primary"></app-glass-icon>
+          <h3>Quick <span class="accent">Actions</span></h3>
+        </div>
+        <div class="actions-list">
+          <div class="action-item">
+            <app-glass-button routerLink="/reload/new" variant="primary" size="large">
+              <app-glass-icon name="add" [size]="18" color="default"></app-glass-icon>
+              New Reload
+            </app-glass-button>
+            <p class="action-desc">Start a new archival reload session for a lot.</p>
+          </div>
+          <div class="action-item">
+            <app-glass-button routerLink="/history" variant="secondary" size="large">
+              <app-glass-icon name="history" [size]="18" color="default"></app-glass-icon>
+              View Sessions
+            </app-glass-button>
+            <p class="action-desc">Browse all past and current reload sessions.</p>
+          </div>
+          <div class="action-item">
+            <app-glass-button routerLink="/monitor" variant="secondary" size="large">
+              <app-glass-icon name="sensors" [size]="18" color="default"></app-glass-icon>
+              File Monitor
+            </app-glass-button>
+            <p class="action-desc">Track pending file statuses across environments.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- System Status Panel -->
+      <section class="glass-panel status-panel">
+        <div class="panel-header">
+          <app-glass-icon name="monitor_heart" color="warning"></app-glass-icon>
+          <h3>System <span class="accent">Status</span></h3>
+        </div>
+
+        @if (statusError()) {
+          <div class="panel-error" role="alert">
+            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <p>{{ statusError() }}</p>
+            <app-glass-button variant="tertiary" size="small" (clicked)="retryDashboard()">
+              Retry
+            </app-glass-button>
+          </div>
+        } @else {
+          <div class="status-content">
+            <div class="status-item">
+              <span class="status-dot" [class.online]="connected()" [class.offline]="!connected()"
+                    role="status" [attr.aria-label]="connected() ? 'API Connected' : 'API Disconnected'"></span>
+              <span class="status-label">Backend API:</span>
+              <span class="status-val" [class.success]="connected()" [class.error]="!connected()">
+                {{ connected() ? 'Connected' : 'Disconnected' }}
+              </span>
+            </div>
+            <div class="status-item">
+              <app-glass-icon name="storage" [size]="16" color="muted"></app-glass-icon>
+              <span class="status-label">Archive Mount:</span>
+              <span class="status-val mono">{{ archiveMountPath() }}</span>
+            </div>
+            <div class="status-item">
+              <app-glass-icon name="timer" [size]="16" color="muted"></app-glass-icon>
+              <span class="status-label">Stuck Timeout:</span>
+              <span class="status-val">{{ data()?.stuckTimeoutMin ?? '—' }} min</span>
+            </div>
+            <hr class="divider">
+            <div class="quick-tips">
+              <h4><app-glass-icon name="lightbulb" [size]="18" color="warning"></app-glass-icon> Quick Tip</h4>
+              <p>Reloading a lot will automatically decompress any .gz files and move them to the environment's inbox for ETL processing.</p>
+            </div>
+          </div>
+        }
+      </section>
+    </div>
+  </div>
+</div>
