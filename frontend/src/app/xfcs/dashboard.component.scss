@@ -1,4 +1,9 @@
-.dashboard-root { padding: 0.25rem; }
+.dashboard-root { padding: 0; }
+
+/* ── Panel Internal Padding ────────────────────────────────── */
+section.glass-panel {
+  padding: 1.75rem;
+}
 
 .dashboard-header {
   display: flex;
