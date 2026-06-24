@@ -801,3 +801,17 @@ body.light-theme .cdk-overlay-pane {
     }
   }
 }
+
+/* ==========================================================================
+   Native Select Dropdown Fix (allow overflow)
+   ========================================================================== */
+
+select {
+  position: relative;
+  z-index: 1001;
+}
+
+.filter-bar,
+.filter-group {
+  overflow: visible !important;
+}
