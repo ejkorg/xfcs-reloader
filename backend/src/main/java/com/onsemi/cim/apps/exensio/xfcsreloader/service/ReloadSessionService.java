@@ -8,11 +8,15 @@ import com.onsemi.cim.apps.exensio.xfcsreloader.entity.ReloadSessionEventEntity;
 import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadPendingFileRepository;
 import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadSessionEventRepository;
 import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadSessionRepository;
+import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.FileCoveragePoint;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.FileStatusDto;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.ReloadRequest;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.ReloadSessionEvent;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.ReloadStatus;
 import com.onsemi.cim.apps.exensio.xfcsreloader.util.FilenameParser;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import jakarta.persistence.Query;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 
 @Service
@@ -45,6 +51,9 @@ public class ReloadSessionService {
     private final EnvFolderResolver envFolderResolver;
     private final SshClient sshClient;
     private final XfcsProperties xfcsProperties;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Autowired
     public ReloadSessionService(ReloadSessionRepository reloadSessionRepository,
@@ -834,6 +843,124 @@ public class ReloadSessionService {
                 filePaths,
                 files
         );
+    }
+
+    /**
+     * Fetch file coverage data grouped by date bucket, environment, and file status.
+     * Mirrors the coverage report from exensioreload.
+     *
+     * @param environment optional filter — if null/blank, all environments are included
+     * @param granularity  "day", "week", or "month"
+     * @param dateFrom     optional start date (inclusive)
+     * @param dateTo       optional end date (inclusive)
+     */
+    public List<FileCoveragePoint> getFileCoverage(String environment, String granularity,
+                                                    String dateFrom, String dateTo) {
+        boolean isOracle = isOracleDialect();
+
+        // Date truncation SQL fragment specific to each DB dialect
+        String dateTruncExpr = isOracle
+                ? switch (granularity) {
+                    case "week"  -> "TO_CHAR(TRUNC(pf.created_at, 'IW'), 'YYYY-MM-DD')";
+                    case "month" -> "TO_CHAR(TRUNC(pf.created_at, 'MM'), 'YYYY-MM-DD')";
+                    default -> "TO_CHAR(TRUNC(pf.created_at, 'DD'), 'YYYY-MM-DD')";
+                  }
+                : switch (granularity) {
+                    case "week"  -> "FORMATDATETIME(pf.created_at, 'YYYY-ww')";
+                    case "month" -> "FORMATDATETIME(pf.created_at, 'yyyy-MM') || '-01'";
+                    default -> "FORMATDATETIME(pf.created_at, 'yyyy-MM-dd')";
+                  };
+
+        String sql = "SELECT " + dateTruncExpr + " AS bucket,\n" +
+                "       pf.environment,\n" +
+                "       COUNT(*)                        AS total,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'completed'     THEN 1 ELSE 0 END) AS done,\n" +
+                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading') THEN 1 ELSE 0 END) AS enqueued,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'pending'       THEN 1 ELSE 0 END) AS staged,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'failed'        THEN 1 ELSE 0 END) AS failed\n" +
+                "FROM xfcs_dearchiver_reload_pending_files pf\n" +
+                "WHERE 1=1\n";
+
+        List<Object> params = new ArrayList<>();
+
+        if (environment != null && !environment.isBlank()) {
+            sql += "  AND pf.environment = ?\n";
+            params.add(environment);
+        }
+        if (dateFrom != null && !dateFrom.isBlank()) {
+            sql += "  AND pf.created_at >= ?\n";
+            params.add(parseDateStart(dateFrom));
+        }
+        if (dateTo != null && !dateTo.isBlank()) {
+            sql += "  AND pf.created_at < ?\n";
+            params.add(parseDateEnd(dateTo));
+        }
+
+        sql += "GROUP BY " + dateTruncExpr + ", pf.environment\n" +
+                "ORDER BY bucket ASC, pf.environment ASC";
+
+        Query query = entityManager.createNativeQuery(sql);
+        for (int i = 0; i < params.size(); i++) {
+            query.setParameter(i + 1, params.get(i));
+        }
+
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+
+        List<FileCoveragePoint> results = new ArrayList<>(rows.size());
+        for (Object[] row : rows) {
+            String bkt = row[0] != null ? row[0].toString() : "unknown";
+            String env = row[1] != null ? row[1].toString() : "unknown";
+            long total = toLong(row[2]);
+            long done = toLong(row[3]);
+            long enqueued = toLong(row[4]);
+            long staged = toLong(row[5]);
+            long failed = toLong(row[6]);
+            results.add(new FileCoveragePoint(bkt, env, total, done, enqueued, staged, failed));
+        }
+        return results;
+    }
+
+    private boolean isOracleDialect() {
+        try {
+            return entityManager.unwrap(java.sql.Connection.class).getMetaData()
+                    .getDatabaseProductName().toLowerCase().contains("oracle");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static long toLong(Object value) {
+        if (value == null) return 0;
+        if (value instanceof Number n) return n.longValue();
+        try { return Long.parseLong(value.toString()); } catch (NumberFormatException e) { return 0; }
+    }
+
+    /**
+     * Parse a date parameter (YYYY-MM-DD or YYYY-MM-DDT00:00:00Z) to a UTC Instant
+     * representing the start of that calendar day (midnight UTC).
+     */
+    private static Instant parseDateStart(String dateStr) {
+        String s = dateStr.trim();
+        if (s.length() == 10) {
+            return LocalDate.parse(s).atStartOfDay(ZoneOffset.UTC).toInstant();
+        }
+        // ISO instant format: YYYY-MM-DDT00:00:00Z
+        return Instant.parse(s);
+    }
+
+    /**
+     * Parse a date parameter (YYYY-MM-DD or YYYY-MM-DDT00:00:00Z) to a UTC Instant
+     * representing the exclusive end of that calendar day (midnight UTC next day).
+     */
+    private static Instant parseDateEnd(String dateStr) {
+        String s = dateStr.trim();
+        if (s.length() == 10) {
+            return LocalDate.parse(s).plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        }
+        // ISO instant: treat as day start and add one day
+        Instant start = Instant.parse(s);
+        return start.plus(java.time.Duration.ofDays(1));
     }
 
     private ReloadSessionEvent toEventDto(ReloadSessionEventEntity entity) {

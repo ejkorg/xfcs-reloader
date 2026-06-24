@@ -3,7 +3,7 @@ import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from '../auth/auth.service';
-import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResult } from './xfcs-models';
+import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, FileCoveragePoint, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResult } from './xfcs-models';
 
 @Injectable({ providedIn: 'root' })
 export class XfcsApiService {
@@ -80,5 +80,17 @@ export class XfcsApiService {
   getStreamUrl(sessionId: string, lastEventId?: number): string {
     const base = `${this.base}/reload/${encodeURIComponent(sessionId)}/stream`;
     return lastEventId != null ? `${base}?lastEventId=${lastEventId}` : base;
+  }
+
+  getFileCoverage(environment?: string, granularity?: string, dateFrom?: string, dateTo?: string): Observable<FileCoveragePoint[]> {
+    const params: Record<string, string> = {};
+    if (environment) params['environment'] = environment;
+    if (granularity) params['granularity'] = granularity;
+    if (dateFrom) params['dateFrom'] = dateFrom;
+    if (dateTo) params['dateTo'] = dateTo;
+    return this.http.get<FileCoveragePoint[]>(`${this.base}/reload/coverage`, {
+      headers: this.auth.getAuthHeaders() ?? undefined,
+      params
+    });
   }
 }

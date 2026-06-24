@@ -27,6 +27,11 @@ export const routes: Routes = [
     loadComponent: () => import('./xfcs/xfcs-analytics.component').then((m) => m.XfcsAnalyticsComponent)
   },
   {
+    path: 'coverage',
+    canActivate: [authGuard, xfcsFeatureGuard],
+    loadComponent: () => import('./xfcs/xfcs-coverage.component').then((m) => m.XfcsCoverageComponent)
+  },
+  {
     path: 'reload/new',
     canActivate: [authGuard, xfcsFeatureGuard],
     loadComponent: () => import('./xfcs/xfcs-stepper.component').then((m) => m.XfcsStepperComponent)

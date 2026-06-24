@@ -268,6 +268,17 @@ public class XfcsController {
         );
     }
 
+    @GetMapping("/reload/coverage")
+    @PreAuthorize("hasAnyRole('ADMIN','USER','SUPER_ADMIN')")
+    public List<?> getFileCoverage(
+            @RequestParam(required = false) String environment,
+            @RequestParam(defaultValue = "day") String granularity,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo) {
+        assertFeatureEnabled();
+        return reloadSessionService.getFileCoverage(environment, granularity, dateFrom, dateTo);
+    }
+
     private void assertFeatureEnabled() {
         if (!xfcsProperties.isFeatureEnabled()) {
             throw new org.springframework.web.server.ResponseStatusException(

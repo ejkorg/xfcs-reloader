@@ -134,3 +134,13 @@ export interface ArchiveLotDetail {
   error?: string;
   processedAt?: number;
 }
+
+export interface FileCoveragePoint {
+  bucket: string;
+  environment: string;
+  total: number;
+  done: number;
+  enqueued: number;
+  staged: number;
+  failed: number;
+}

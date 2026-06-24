@@ -265,6 +265,13 @@ import { CommonModule } from '@angular/common';
           <path d="M8 12l-2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         </g>
 
+        <!-- Bar Chart / Coverage -->
+        <g *ngSwitchCase="'bar_chart'">
+          <rect x="4" y="10" width="4" height="10" rx="1" stroke="currentColor" stroke-width="2" fill="none"/>
+          <rect x="10" y="4" width="4" height="16" rx="1" stroke="currentColor" stroke-width="2" fill="none"/>
+          <rect x="16" y="7" width="4" height="13" rx="1" stroke="currentColor" stroke-width="2" fill="none"/>
+        </g>
+
         <!-- Default fallback -->
         <g *ngSwitchDefault>
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
