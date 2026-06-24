@@ -858,50 +858,60 @@ public class ReloadSessionService {
                                                     String dateFrom, String dateTo) {
         boolean isOracle = isOracleDialect();
 
-        // Date truncation SQL fragment specific to each DB dialect
+        // Date truncation SQL fragment specific to each DB dialect.
+        // Oracle: cast to TIMESTAMP WITH TIME ZONE at UTC first, then TRUNC —
+        //         guards against the DB session timezone shifting bucket boundaries.
+        // H2:     stored as epoch millis, FORMATDATETIME interprets in JVM timezone;
+        //         with hibernate.jdbc.time_zone=UTC and JVM in UTC this is consistent.
         String dateTruncExpr = isOracle
                 ? switch (granularity) {
-                    case "week"  -> "TO_CHAR(TRUNC(pf.created_at, 'IW'), 'YYYY-MM-DD')";
-                    case "month" -> "TO_CHAR(TRUNC(pf.created_at, 'MM'), 'YYYY-MM-DD')";
-                    default -> "TO_CHAR(TRUNC(pf.created_at, 'DD'), 'YYYY-MM-DD')";
+                    case "week"  -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'IW'), 'YYYY-MM-DD')";
+                    case "month" -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'MM'), 'YYYY-MM-DD')";
+                    default      -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'DD'), 'YYYY-MM-DD')";
                   }
                 : switch (granularity) {
                     case "week"  -> "FORMATDATETIME(pf.created_at, 'YYYY-ww')";
                     case "month" -> "FORMATDATETIME(pf.created_at, 'yyyy-MM') || '-01'";
-                    default -> "FORMATDATETIME(pf.created_at, 'yyyy-MM-dd')";
+                    default      -> "FORMATDATETIME(pf.created_at, 'yyyy-MM-dd')";
                   };
 
-        String sql = "SELECT " + dateTruncExpr + " AS bucket,\n" +
+        StringBuilder sql = new StringBuilder(
+                "SELECT " + dateTruncExpr + " AS bucket,\n" +
                 "       pf.environment,\n" +
                 "       COUNT(*)                        AS total,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'completed'     THEN 1 ELSE 0 END) AS done,\n" +
-                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading') THEN 1 ELSE 0 END) AS enqueued,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'pending'       THEN 1 ELSE 0 END) AS staged,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'failed'        THEN 1 ELSE 0 END) AS failed\n" +
+                "       SUM(CASE WHEN pf.file_status = 'completed'                      THEN 1 ELSE 0 END) AS done,\n" +
+                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading')   THEN 1 ELSE 0 END) AS enqueued,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'pending'                        THEN 1 ELSE 0 END) AS staged,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'failed'                         THEN 1 ELSE 0 END) AS failed\n" +
                 "FROM xfcs_dearchiver_reload_pending_files pf\n" +
-                "WHERE 1=1\n";
+                "WHERE 1=1\n");
 
-        List<Object> params = new ArrayList<>();
-
+        // Use named parameters to avoid positional index issues and Oracle JDBC type binding.
+        // For date params we pass a java.sql.Timestamp which Oracle JDBC handles correctly.
         if (environment != null && !environment.isBlank()) {
-            sql += "  AND pf.environment = ?\n";
-            params.add(environment);
+            sql.append("  AND pf.environment = :env\n");
         }
         if (dateFrom != null && !dateFrom.isBlank()) {
-            sql += "  AND pf.created_at >= ?\n";
-            params.add(parseDateStart(dateFrom));
+            sql.append("  AND pf.created_at >= :dateFrom\n");
         }
         if (dateTo != null && !dateTo.isBlank()) {
-            sql += "  AND pf.created_at < ?\n";
-            params.add(parseDateEnd(dateTo));
+            sql.append("  AND pf.created_at < :dateTo\n");
         }
 
-        sql += "GROUP BY " + dateTruncExpr + ", pf.environment\n" +
-                "ORDER BY bucket ASC, pf.environment ASC";
+        sql.append("GROUP BY ").append(dateTruncExpr).append(", pf.environment\n")
+           .append("ORDER BY bucket ASC, pf.environment ASC");
 
-        Query query = entityManager.createNativeQuery(sql);
-        for (int i = 0; i < params.size(); i++) {
-            query.setParameter(i + 1, params.get(i));
+        Query query = entityManager.createNativeQuery(sql.toString());
+
+        if (environment != null && !environment.isBlank()) {
+            query.setParameter("env", environment);
+        }
+        if (dateFrom != null && !dateFrom.isBlank()) {
+            // Pass as java.sql.Timestamp so Oracle JDBC binds it as TIMESTAMP, not BINARY_FLOAT
+            query.setParameter("dateFrom", java.sql.Timestamp.from(parseDateStart(dateFrom)));
+        }
+        if (dateTo != null && !dateTo.isBlank()) {
+            query.setParameter("dateTo", java.sql.Timestamp.from(parseDateEnd(dateTo)));
         }
 
         @SuppressWarnings("unchecked")
@@ -911,23 +921,38 @@ public class ReloadSessionService {
         for (Object[] row : rows) {
             String bkt = row[0] != null ? row[0].toString() : "unknown";
             String env = row[1] != null ? row[1].toString() : "unknown";
-            long total = toLong(row[2]);
-            long done = toLong(row[3]);
+            long total    = toLong(row[2]);
+            long done     = toLong(row[3]);
             long enqueued = toLong(row[4]);
-            long staged = toLong(row[5]);
-            long failed = toLong(row[6]);
+            long staged   = toLong(row[5]);
+            long failed   = toLong(row[6]);
             results.add(new FileCoveragePoint(bkt, env, total, done, enqueued, staged, failed));
         }
         return results;
     }
 
     private boolean isOracleDialect() {
+        // Check the JPA database-platform property set in application.yml.
+        // This avoids any runtime connection unwrapping which can throw in managed JPA contexts.
         try {
-            return entityManager.unwrap(java.sql.Connection.class).getMetaData()
-                    .getDatabaseProductName().toLowerCase().contains("oracle");
+            Object platformProp = entityManager.getEntityManagerFactory()
+                    .getProperties()
+                    .get("hibernate.dialect");
+            if (platformProp != null && platformProp.toString().toLowerCase().contains("oracle")) {
+                log.debug("[Coverage] Detected Oracle dialect from hibernate.dialect property: {}", platformProp);
+                return true;
+            }
+            // Also check JPA database-platform variant
+            Object jpaDialect = entityManager.getEntityManagerFactory()
+                    .getProperties()
+                    .get("javax.persistence.database-product-name");
+            if (jpaDialect != null && jpaDialect.toString().toLowerCase().contains("oracle")) {
+                return true;
+            }
         } catch (Exception e) {
-            return false;
+            log.warn("[Coverage] Could not detect DB dialect, defaulting to non-Oracle: {}", e.getMessage());
         }
+        return false;
     }
 
     private static long toLong(Object value) {
