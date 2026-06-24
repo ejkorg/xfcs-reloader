@@ -201,10 +201,24 @@ import type { ECharts, EChartsOption } from 'echarts';
       padding: 0.45rem 0.7rem;
       border-radius: 8px;
       border: 1px solid var(--card-border);
-      background: var(--bg-main);
+      background: var(--bg-gradient-start, #0f172a);
       color: var(--text-main);
       font-size: 0.85rem;
       min-width: 130px;
+    }
+    .filter-group select option {
+      background: var(--bg-gradient-start, #0f172a);
+      color: var(--text-main);
+    }
+    :host-context(body.light-theme) .filter-group select,
+    :host-context(body.light-theme) .filter-group input {
+      background: #ffffff;
+      color: #0f172a;
+      border-color: rgba(15, 23, 42, 0.2);
+    }
+    :host-context(body.light-theme) .filter-group select option {
+      background: #ffffff;
+      color: #0f172a;
     }
     .run-btn {
       display: flex; align-items: center; gap: 0.4rem;
