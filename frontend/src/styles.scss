@@ -735,3 +735,69 @@ body.light-theme .xfcs-th-sort.active { color: #4f46e5; }
   color: #818cf8;
   font-weight: 800;
 }
+
+
+/* ==========================================================================
+   CDK Overlay Global Styles (for dropdowns in both light and dark themes)
+   ========================================================================== */
+
+/* Dark theme dropdowns */
+body.dark-theme .cdk-overlay-pane {
+  .glass-dropdown-panel {
+    background: rgba(15, 23, 42, 0.98) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+
+  .glass-option {
+    color: var(--text-main) !important;
+    padding: 0.5rem 1rem !important;
+    border-radius: 6px !important;
+    margin: 0.25rem 0.5rem !important;
+    transition: all 0.15s ease !important;
+
+    &:hover,
+    &.is-highlighted {
+      background: rgba(129, 140, 248, 0.12) !important;
+      color: var(--text-main) !important;
+      border-color: rgba(129, 140, 248, 0.25) !important;
+    }
+
+    &.is-selected {
+      background: rgba(129, 140, 248, 0.18) !important;
+      color: var(--accent-color) !important;
+      font-weight: 600 !important;
+    }
+  }
+}
+
+/* Light theme dropdowns */
+body.light-theme .cdk-overlay-pane {
+  .glass-dropdown-panel {
+    background: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.12) !important;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .glass-option {
+    color: var(--text-main) !important;
+    padding: 0.5rem 1rem !important;
+    border-radius: 6px !important;
+    margin: 0.25rem 0.5rem !important;
+    transition: all 0.15s ease !important;
+
+    &:hover,
+    &.is-highlighted {
+      background: rgba(79, 70, 229, 0.08) !important;
+      color: var(--text-main) !important;
+    }
+
+    &.is-selected {
+      background: rgba(79, 70, 229, 0.12) !important;
+      color: var(--accent-color) !important;
+      font-weight: 600 !important;
+    }
+  }
+}
