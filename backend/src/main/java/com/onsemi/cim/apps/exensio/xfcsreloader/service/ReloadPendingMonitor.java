@@ -51,6 +51,9 @@ public class ReloadPendingMonitor {
     private final ExensioClient exensioClient;
 
     @Autowired(required = false)
+    private PpLogQueryService ppLogQueryService;
+
+    @Autowired(required = false)
     private ReloadSessionCompletionEmailService completionEmailService;
 
     public ReloadPendingMonitor(ReloadSessionRepository sessionRepository,
@@ -271,10 +274,29 @@ public class ReloadPendingMonitor {
                         }
 
                     } else if (foundStr.contains("/notprocessed/") || foundStr.endsWith("/notprocessed")) {
-                        String errReason = tryReadErrReason(foundPath.toString());
-                        String msg = errReason == null
-                                ? ("ETL rejected (NotProcessed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ")")
-                                : ("ETL rejected (NotProcessed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Reason: " + errReason);
+                        String errReason = null;
+                        
+                        // Try pp_log first if available
+                        if (ppLogQueryService != null) {
+                            PpLogQueryService.PpLogResult ppLogResult = ppLogQueryService.queryByLotAndEnv(
+                                    pf.getUserLotId(), pf.getEnvironment(), pf.getFileName());
+                            if (ppLogResult != null && ppLogResult.reason() != null && !ppLogResult.reason().isBlank()) {
+                                errReason = ppLogResult.reason();
+                                log.debug("[PendingMonitor] Got error reason from pp_log for {}: {}", pf.getFileName(), errReason);
+                            }
+                        }
+                        
+                        // Fall back to .err file if pp_log didn't provide a reason
+                        if (errReason == null) {
+                            errReason = tryReadErrReason(foundPath.toString());
+                        }
+                        
+                        // If both pp_log and .err file failed, use generic message
+                        if (errReason == null) {
+                            errReason = "ETL rejected file. No detail available.";
+                        }
+                        
+                        String msg = "ETL rejected (NotProcessed/): " + pf.getFileName() + " (Lot: " + pf.getUserLotId() + ") | Reason: " + errReason;
 
                         pf.setFileStatus("failed");
                         pf.setErrorReason(errReason);

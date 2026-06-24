@@ -51,6 +51,7 @@ public class ReloadSessionService {
     private final EnvFolderResolver envFolderResolver;
     private final SshClient sshClient;
     private final XfcsProperties xfcsProperties;
+    private final PpLogQueryService ppLogQueryService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -64,7 +65,8 @@ public class ReloadSessionService {
                                 ObjectMapper objectMapper,
                                 EnvFolderResolver envFolderResolver,
                                 SshClient sshClient,
-                                XfcsProperties xfcsProperties) {
+                                XfcsProperties xfcsProperties,
+                                @Autowired(required = false) PpLogQueryService ppLogQueryService) {
         this.reloadSessionRepository = reloadSessionRepository;
         this.reloadSessionEventRepository = reloadSessionEventRepository;
         this.reloadPendingFileRepository = reloadPendingFileRepository;
@@ -74,6 +76,7 @@ public class ReloadSessionService {
         this.envFolderResolver = envFolderResolver;
         this.sshClient = sshClient;
         this.xfcsProperties = xfcsProperties;
+        this.ppLogQueryService = ppLogQueryService;
     }
 
     /**
@@ -95,7 +98,8 @@ public class ReloadSessionService {
                 objectMapper,
                 null,
                 null,
-                new XfcsProperties()
+                new XfcsProperties(),
+                null
         );
     }
 
@@ -295,45 +299,68 @@ public class ReloadSessionService {
     }
 
     private void enrichDestinationFromLogs(ReloadSessionEntity session, Collection<MutableFileStatus> files) {
-        if (envFolderResolver == null || sshClient == null || xfcsProperties == null) return;
         if (session == null || files == null || files.isEmpty()) return;
         String environment = session.getEnvironment();
         if (environment == null || environment.isBlank()) return;
-
-        EnvFolderResolver.EnvResolutionInfo res = envFolderResolver.resolveEnvDetails(environment);
-
-        // Determine log path: prefer explicit --log from .cfg, fall back to convention:
-        //   <dataRoot>/<envName_lower>/log/<envName_lower>.log
-        // e.g. /apps/exensio_data/data/szft_eagle/log/szft_eagle.log
-        String logPath = null;
-        if (res != null && res.logPath() != null && !res.logPath().isBlank()) {
-            logPath = res.logPath();
-        } else {
-            // Convention-based: dataRoot / envName / log / envName.log
-            String envLower = environment.toLowerCase(java.util.Locale.ROOT);
-            String dataRoot = xfcsProperties.getDataRoot();
-            if (dataRoot != null && !dataRoot.isBlank()) {
-                logPath = java.nio.file.Paths.get(dataRoot)
-                        .resolve(envLower)
-                        .resolve("log")
-                        .resolve(envLower + ".log")
-                        .toString()
-                        .replace("\\", "/");
-                log.debug("[SessionService] No --log in cfg for env='{}', using convention log path: {}", environment, logPath);
-            }
-        }
-
-        if (logPath == null || logPath.isBlank()) {
-            log.debug("[SessionService] No logPath resolved for env='{}', skipping destination enrichment", environment);
-            return;
-        }
-        log.debug("[SessionService] Enriching destination from log: env='{}', logPath='{}'", environment, logPath);
 
         for (MutableFileStatus m : files) {
             if (m == null) continue;
             if (!"completed".equalsIgnoreCase(m.fileStatus)) continue;
             if (m.destinationFolder != null && !m.destinationFolder.isBlank()) continue;
             if (m.fileName == null || m.fileName.isBlank()) continue;
+
+            // Try pp_log first
+            if (ppLogQueryService != null) {
+                PpLogQueryService.PpLogResult ppLogResult = ppLogQueryService.queryByLotAndEnv(
+                        m.userLotId, environment, m.fileName);
+                
+                if (ppLogResult != null && ppLogResult.destination() != null && !ppLogResult.destination().isBlank()) {
+                    m.destinationFolder = ppLogResult.destination();
+                    
+                    // If SANDBOX and result has reason → set errorReason, skip .log file path
+                    if ("SANDBOX".equalsIgnoreCase(ppLogResult.destination()) && 
+                        ppLogResult.reason() != null && !ppLogResult.reason().isBlank()) {
+                        m.errorReason = ppLogResult.reason();
+                    }
+                    
+                    log.debug("[SessionService] Enriched destination from pp_log: fileName='{}', destination={}", 
+                            m.fileName, m.destinationFolder);
+                    continue;
+                }
+            }
+
+            // Fall back to existing .log file method
+            if (envFolderResolver == null || sshClient == null || xfcsProperties == null) {
+                continue;
+            }
+
+            EnvFolderResolver.EnvResolutionInfo res = envFolderResolver.resolveEnvDetails(environment);
+
+            // Determine log path: prefer explicit --log from .cfg, fall back to convention:
+            //   <dataRoot>/<envName_lower>/log/<envName_lower>.log
+            // e.g. /apps/exensio_data/data/szft_eagle/log/szft_eagle.log
+            String logPath = null;
+            if (res != null && res.logPath() != null && !res.logPath().isBlank()) {
+                logPath = res.logPath();
+            } else {
+                // Convention-based: dataRoot / envName / log / envName.log
+                String envLower = environment.toLowerCase(java.util.Locale.ROOT);
+                String dataRoot = xfcsProperties.getDataRoot();
+                if (dataRoot != null && !dataRoot.isBlank()) {
+                    logPath = java.nio.file.Paths.get(dataRoot)
+                            .resolve(envLower)
+                            .resolve("log")
+                            .resolve(envLower + ".log")
+                            .toString()
+                            .replace("\\", "/");
+                    log.debug("[SessionService] No --log in cfg for env='{}', using convention log path: {}", environment, logPath);
+                }
+            }
+
+            if (logPath == null || logPath.isBlank()) {
+                log.debug("[SessionService] No logPath resolved for env='{}', skipping destination enrichment", environment);
+                continue;
+            }
 
             String fromLog = inferDestinationFromLog(logPath, m.fileName);
             if (fromLog != null && !fromLog.isBlank()) {

@@ -123,9 +123,15 @@ export interface SearchRow {
               <div class="search-row" *ngFor="let row of searchRows(); let i = index">
                 <div class="row-header">
                   <span class="row-title">Criteria Block {{ i + 1 }}</span>
-                  <button type="button" class="btn-remove" *ngIf="searchRows().length > 1" (click)="removeRow(row.id)">
-                    <app-glass-icon name="close" [size]="14"></app-glass-icon>
-                  </button>
+                  <div class="row-header-actions">
+                    <button type="button" class="btn-clear-lots" *ngIf="row.lots.length > 0" (click)="clearBlockLots(row.id)">
+                      <app-glass-icon name="playlist_remove" [size]="14"></app-glass-icon>
+                      <span>Clear Lots</span>
+                    </button>
+                    <button type="button" class="btn-remove" *ngIf="searchRows().length > 1" (click)="removeRow(row.id)">
+                      <app-glass-icon name="close" [size]="14"></app-glass-icon>
+                    </button>
+                  </div>
                 </div>
                 <div class="row-pickers">
                   <app-glass-select
@@ -179,7 +185,10 @@ export interface SearchRow {
             </div>
           </div>
 
-          <div class="pane-footer mt-6">
+          <div class="pane-footer split mt-6">
+            <app-glass-button variant="secondary" (clicked)="resetAll()">
+              Reset All
+            </app-glass-button>
             <app-glass-button variant="primary" [disabled]="!canSearch()" [loading]="searching()" (clicked)="performSearch()">
               Search Archive →
             </app-glass-button>
@@ -194,6 +203,46 @@ export interface SearchRow {
           </div>
 
           <div class="results-container">
+            <!-- Lot Stats Summary Panel (shown after search, when results exist or lots were entered) -->
+            <div class="lot-stats-panel" *ngIf="currentStep() === 2 && lotStats().totalEntered > 0">
+              <div class="stats-header">
+                <h4 class="stats-title">Search Summary</h4>
+              </div>
+              <div class="stats-grid">
+                <div class="stat-item">
+                  <span class="stat-label">Total Lots Entered</span>
+                  <span class="stat-value">{{ lotStats().totalEntered }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Lots Found</span>
+                  <span class="stat-value found">{{ lotStats().totalFound }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">Lots Not Found</span>
+                  <span class="stat-value" [class.warning]="lotStats().totalNotFound > 0">{{ lotStats().totalNotFound }}</span>
+                </div>
+              </div>
+
+              <!-- Not-found lots list and export button (only when there are not-found lots) -->
+              <div class="not-found-section" *ngIf="lotStats().totalNotFound > 0">
+                <div class="not-found-header">
+                  <button type="button" class="btn-collapse" (click)="toggleNotFoundList()">
+                    <span class="material-icons">{{ showNotFoundList() ? 'expand_less' : 'expand_more' }}</span>
+                    <span>Not-Found Lots ({{ lotStats().totalNotFound }})</span>
+                  </button>
+                  <app-glass-button variant="secondary" (clicked)="exportNotFoundCsv()">
+                    <span class="material-icons" style="font-size:0.9rem">download</span>
+                    <span>Export CSV</span>
+                  </app-glass-button>
+                </div>
+                <div class="not-found-list" *ngIf="showNotFoundList()">
+                  <div class="lot-item" *ngFor="let lot of lotStats().notFoundLots">
+                    <span class="lot-badge">{{ lot }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Empty state: no results found -->
             <div class="empty-state" *ngIf="searchResults().length === 0">
               <div class="empty-icon-wrap">
@@ -375,13 +424,127 @@ export interface SearchRow {
 
     .form-container { display: flex; flex-direction: column; gap: 1.5rem; }
     .pane-footer { display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 1.5rem; }
+    .pane-footer.split { justify-content: space-between; }
     .monitor-container { display: flex; flex-direction: column; gap: 1rem; }
     .file-tracker { width: 100%; }
 
     .mt-4 { margin-top: 1rem; }
     .mt-6 { margin-top: 1.5rem; }
 
-    /* ENV META CHIPS */
+    /* LOT STATS PANEL */
+    .lot-stats-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1.5rem;
+      border-radius: 12px;
+      border: 1px solid rgba(129, 140, 248, 0.2);
+      background: rgba(30, 24, 64, 0.6);
+      margin-bottom: 1.5rem;
+    }
+    .stats-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .stats-title {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--accent-color);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      border: 1px solid rgba(167, 139, 250, 0.15);
+      background: rgba(30, 24, 64, 0.5);
+    }
+    .stat-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stat-value.found {
+      color: #10b981;
+    }
+    .stat-value.warning {
+      color: #f59e0b;
+    }
+
+    .not-found-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding-top: 1rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .not-found-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .btn-collapse {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+      transition: color 0.2s;
+    }
+    .btn-collapse .material-icons {
+      font-size: 1.1rem;
+    }
+    .btn-collapse:hover {
+      color: var(--accent-color);
+    }
+    .not-found-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      animation: slideDown 0.2s ease-out;
+    }
+    .lot-item {
+      display: flex;
+      align-items: center;
+    }
+    .lot-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.35rem 0.7rem;
+      background: rgba(251, 146, 60, 0.15);
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      border-radius: 6px;
+      color: #fb923c;
+      font-size: 0.8rem;
+      font-weight: 600;
+      font-family: monospace;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
     .env-meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
@@ -458,9 +621,12 @@ export interface SearchRow {
 
     .search-row { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border-radius: 12px; border: 1px solid rgba(167, 139, 250, 0.2); background: rgba(30, 24, 64, 0.45); }
     .row-header { display: flex; justify-content: space-between; align-items: center; }
+    .row-header-actions { display: flex; align-items: center; gap: 0.4rem; }
     .row-title { font-size: 0.75rem; font-weight: 700; color: var(--accent-color); text-transform: uppercase; letter-spacing: 0.05em; }
     .btn-remove { background: transparent; border: none; color: var(--text-muted); padding: 0.2rem; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
     .btn-remove:hover { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    .btn-clear-lots { display: flex; align-items: center; gap: 0.3rem; background: transparent; border: 1px solid rgba(167, 139, 250, 0.25); border-radius: 6px; color: var(--text-muted); font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.5rem; cursor: pointer; transition: all 0.2s; }
+    .btn-clear-lots:hover { background: rgba(167, 139, 250, 0.12); color: var(--accent-color); border-color: rgba(167, 139, 250, 0.5); }
     .row-pickers { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
     .row-textarea { display: flex; flex-direction: column; gap: 0.25rem; }
     .floating-label { font-size: 0.6875rem; font-weight: 600; color: var(--text-muted); letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px; }
@@ -667,6 +833,44 @@ export class XfcsStepperComponent implements OnInit {
       .map((f: SearchResult): string => f.path)
       .filter((p: string): boolean => !!p && p.trim().length > 0)
   );
+
+  // Lot Statistics (computed from search rows and results)
+  lotStats = computed(() => {
+    // Collect all unique entered lots from all search rows
+    const enteredLots = new Set<string>();
+    for (const row of this.searchRows()) {
+      for (const lot of row.lots) {
+        enteredLots.add(lot);
+      }
+      // Also parse lotsRaw if there's any unparsed content
+      const rawTokens = row.lotsRaw
+        .split(/[,;\n\s]+/)
+        .map(t => t.trim().toUpperCase())
+        .filter(t => t.length >= this.MIN_LOT_LENGTH);
+      for (const token of rawTokens) {
+        enteredLots.add(token);
+      }
+    }
+
+    // Collect all unique found lots from search results
+    const foundLots = new Set<string>();
+    for (const result of this.searchResults()) {
+      const lotId = result.userLotId || result.lotId;
+      if (lotId) {
+        foundLots.add(lotId);
+      }
+    }
+
+    // Compute not-found lots
+    const notFoundLots: string[] = Array.from(enteredLots).filter(lot => !foundLots.has(lot));
+
+    return {
+      totalEntered: enteredLots.size,
+      totalFound: foundLots.size,
+      totalNotFound: notFoundLots.length,
+      notFoundLots: notFoundLots.sort()
+    };
+  });
   
   // Execution State
   sessionId = signal<string>('');
@@ -676,6 +880,7 @@ export class XfcsStepperComponent implements OnInit {
   executionTerminalStatus = signal<string>('');
 
   focusedRowId = signal<number | null>(null);
+  showNotFoundList = signal<boolean>(false);
   private rowIdCounter = 1;
 
   constructor(
@@ -981,6 +1186,50 @@ export class XfcsStepperComponent implements OnInit {
 
   isStep4Completed(): boolean {
     return this.executionTerminalStatus() === 'completed';
+  }
+
+  resetAll(): void {
+    this.environment.set('');
+    this.rowIdCounter = 1;
+    this.searchRows.set([{ id: 1, lotsRaw: '', lots: [], rejectedLots: [] }]);
+    this.searchResults.set([]);
+    this.selectedFiles.set([]);
+    this.executionTerminalStatus.set('');
+  }
+
+  clearBlockLots(id: number): void {
+    this.searchRows.update((rows: SearchRow[]) =>
+      rows.map((r: SearchRow) => r.id === id ? { ...r, lots: [], lotsRaw: '' } : r)
+    );
+  }
+
+  buildNotFoundCsv(lots: string[]): string {
+    const lines = ['lot_id'];
+    for (const lot of lots) {
+      lines.push(lot);
+    }
+    return lines.join('\n');
+  }
+
+  exportNotFoundCsv(): void {
+    const notFound = this.lotStats().notFoundLots;
+    if (notFound.length === 0) {
+      this.toast.warning('No lots to export');
+      return;
+    }
+
+    const csv = this.buildNotFoundCsv(notFound);
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+    const filename = `lots-not-found-${ts}.csv`;
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    this.triggerBrowserDownload(blob, filename);
+    this.toast.success(`Exported ${notFound.length} lot(s) to ${filename}`);
+  }
+
+  toggleNotFoundList(): void {
+    this.showNotFoundList.update(v => !v);
   }
 
   // Row Management
