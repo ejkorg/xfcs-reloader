@@ -84,7 +84,7 @@ import { ToastService } from '../shared/services/toast.service';
               </td>
               <td class="text-sm text-muted">{{ fileEventLabel(f) }}</td>
               <td class="text-sm text-muted">{{ f.createdAt | date:'short' }}</td>
-              <td class="text-sm text-muted">{{ f.resolvedAt | date:'short' || '—' }}</td>
+              <td class="text-sm text-muted">{{ (f.resolvedAt | date:'short') ?? '—' }}</td>
               <td *ngIf="!embedded">
                 <span class="dest-badge" *ngIf="f.destinationFolder">{{ f.destinationFolder }}</span>
               </td>
