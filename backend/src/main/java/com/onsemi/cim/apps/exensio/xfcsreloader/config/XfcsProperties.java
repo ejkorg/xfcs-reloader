@@ -7,8 +7,9 @@ public class XfcsProperties {
     private String envConfPath = "/apps/exensio_data/xfcs-reloader/env.conf";
     private boolean featureEnabled = true;
     private String archivesRoot = "/archives";
-    private int searchMaxResults = 200;
-    private int searchMaxFilesScan = 20000;
+    private int searchMaxResults = 5000;
+    private int searchMaxFilesScan = 50000;
+    private int searchDisplayLimit = 500;  // Max files to display in UI
     private int envConfCacheTtlSec = 120;
     private int envConfRetries = 2;
     private int envConfRetryBackoffMs = 500;
@@ -96,6 +97,14 @@ public class XfcsProperties {
 
     public void setSearchMaxFilesScan(int searchMaxFilesScan) {
         this.searchMaxFilesScan = searchMaxFilesScan;
+    }
+
+    public int getSearchDisplayLimit() {
+        return searchDisplayLimit;
+    }
+
+    public void setSearchDisplayLimit(int searchDisplayLimit) {
+        this.searchDisplayLimit = searchDisplayLimit;
     }
 
     public int getEnvConfCacheTtlSec() {

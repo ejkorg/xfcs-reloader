@@ -906,10 +906,10 @@ public class ReloadSessionService {
                 "SELECT " + dateTruncExpr + " AS bucket,\n" +
                 "       pf.environment,\n" +
                 "       COUNT(*)                        AS total,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'completed'                      THEN 1 ELSE 0 END) AS done,\n" +
-                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading')   THEN 1 ELSE 0 END) AS enqueued,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'pending'                        THEN 1 ELSE 0 END) AS staged,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'failed'                         THEN 1 ELSE 0 END) AS failed\n" +
+                "       SUM(CASE WHEN pf.file_status = 'completed'                              THEN 1 ELSE 0 END) AS done,\n" +
+                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading','etl_complete')   THEN 1 ELSE 0 END) AS enqueued,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'pending'                                THEN 1 ELSE 0 END) AS staged,\n" +
+                "       SUM(CASE WHEN pf.file_status = 'failed'                                 THEN 1 ELSE 0 END) AS failed\n" +
                 "FROM xfcs_dearchiver_reload_pending_files pf\n" +
                 "WHERE 1=1\n");
 

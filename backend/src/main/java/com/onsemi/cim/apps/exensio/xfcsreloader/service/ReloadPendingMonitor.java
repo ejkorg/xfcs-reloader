@@ -40,6 +40,31 @@ public class ReloadPendingMonitor {
     private static final List<String> TERMINAL_STATUSES =
             List.of("completed", "failed", "partially_failed", "cancelled");
 
+    /**
+     * Statuses that indicate a file has cleared ETL pre-processing and is awaiting
+     * Exensio confirmation. Includes the legacy {@code "exensio_loading"} value for
+     * backward compatibility during rolling deployments.
+     */
+    static final Set<String> ETL_COMPLETE_STATUSES =
+            Set.of("etl_complete", "exensio_loading");
+
+    /**
+     * Returns {@code true} when all files in the list have cleared ETL pre-processing —
+     * i.e. none remain in {@code "pending"} or {@code "staging"} status.
+     *
+     * <p>An empty or null list returns {@code false}: the session either already
+     * finished or has nothing to confirm.</p>
+     *
+     * @param sessionFiles files belonging to a single session
+     * @return {@code true} iff the ETL fence is crossed for this session
+     */
+    static boolean isEtlFenceCrossed(List<ReloadPendingFileEntity> sessionFiles) {
+        if (sessionFiles == null || sessionFiles.isEmpty()) return false;
+        return sessionFiles.stream()
+                .noneMatch(f -> "pending".equals(f.getFileStatus())
+                             || "staging".equals(f.getFileStatus()));
+    }
+
     private final ReloadSessionRepository sessionRepository;
     private final ReloadSessionEventRepository eventRepository;
     private final ReloadPendingFileRepository pendingFileRepository;
@@ -107,15 +132,17 @@ public class ReloadPendingMonitor {
     }
 
     /**
-     * On startup, remove pending file entries for sessions that are already terminal.
-     * These are leftovers from previous runs where the monitor failed to clean up.
+     * On startup, remove pending file entries for sessions that are already terminal,
+     * then re-trigger the Exensio batch lookup for any session whose ETL fence was
+     * crossed before the restart (all remaining files are in {@code etl_complete} /
+     * {@code exensio_loading} state).
      */
     private void cleanupOrphanedPendingFiles() {
         try {
             List<ReloadPendingFileEntity> allPending = pendingFileRepository.findAll();
             if (allPending.isEmpty()) return;
 
-            int removed = 0;
+            // Phase 1: drop pending rows that belong to already-terminal sessions.
             for (ReloadPendingFileEntity pf : allPending) {
                 sessionRepository.findById(pf.getSessionId()).ifPresent(session -> {
                     String status = session.getStatus() == null ? "" : session.getStatus().toLowerCase();
@@ -126,6 +153,45 @@ public class ReloadPendingMonitor {
             }
             pendingFileRepository.flush();
             log.info("[PendingMonitor] Startup cleanup: removed orphaned pending entries for terminal sessions.");
+
+            // Phase 2: re-trigger Exensio for sessions whose ETL fence was already
+            // crossed before the restart (all files are in etl_complete / exensio_loading).
+            if (exensioProperties.isEnabled()) {
+                List<ReloadPendingFileEntity> stillPending = pendingFileRepository.findAll();
+                Map<String, List<ReloadPendingFileEntity>> bySession =
+                        stillPending.stream()
+                                .collect(java.util.stream.Collectors.groupingBy(
+                                        ReloadPendingFileEntity::getSessionId));
+
+                for (Map.Entry<String, List<ReloadPendingFileEntity>> entry : bySession.entrySet()) {
+                    String sessionId = entry.getKey();
+                    List<ReloadPendingFileEntity> sessionFiles = entry.getValue();
+
+                    if (!isEtlFenceCrossed(sessionFiles)) {
+                        // Session still has pending/staging files — normal scan will handle them.
+                        continue;
+                    }
+
+                    List<ReloadPendingFileEntity> etlComplete = sessionFiles.stream()
+                            .filter(f -> ETL_COMPLETE_STATUSES.contains(f.getFileStatus()))
+                            .toList();
+
+                    if (etlComplete.isEmpty()) {
+                        // Fence crossed but no etl_complete files (all failed/terminal) — nothing to do.
+                        continue;
+                    }
+
+                    log.info("[PendingMonitor] Startup resume: session={} has {} etl_complete file(s) " +
+                            "with ETL fence already crossed — re-triggering Exensio batch.",
+                            sessionId, etlComplete.size());
+
+                    Set<String> sessionsToFinalize = new HashSet<>();
+                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize);
+                    for (String sid : sessionsToFinalize) {
+                        finalizeSessionIfDone(sid);
+                    }
+                }
+            }
         } catch (Exception e) {
             log.warn("[PendingMonitor] Startup cleanup failed: {}", e.getMessage());
         }
@@ -238,9 +304,10 @@ public class ReloadPendingMonitor {
                         String destination = detectDestinationFromOutbox(environment, pf.getFileName());
 
                         if (exensioProperties.isEnabled()) {
-                            // Only transition to exensio_loading once — avoid spamming events on every scan cycle
-                            if (!"exensio_loading".equals(pf.getFileStatus())) {
-                                pf.setFileStatus("exensio_loading");
+                            // Only transition to etl_complete once — avoid spamming events on every scan cycle.
+                            // Also accept the legacy "exensio_loading" value so rolling deploys are seamless.
+                            if (!ETL_COMPLETE_STATUSES.contains(pf.getFileStatus())) {
+                                pf.setFileStatus("etl_complete");
                                 pf.setDestinationFolder(destination);
                                 pendingFileRepository.save(pf);
 
@@ -342,10 +409,54 @@ public class ReloadPendingMonitor {
                 pendingFileRepository.flush();
             }
 
-            if (exensioProperties.isEnabled()) {
-                List<ReloadPendingFileEntity> exensioLoading = pendingFileRepository.findByFileStatus("exensio_loading");
-                if (!exensioLoading.isEmpty()) {
-                    processExensioLoading(exensioLoading, sessionsToFinalize);
+            // Per-session ETL fence check: after processing all files in this scan cycle,
+            // group the remaining (non-removed) pending files by session and check whether
+            // each session has crossed the ETL fence (no files remain in pending/staging).
+            List<ReloadPendingFileEntity> stillPending = pendingFileRepository.findAll();
+            Map<String, List<ReloadPendingFileEntity>> bySession =
+                    stillPending.stream()
+                            .collect(java.util.stream.Collectors.groupingBy(ReloadPendingFileEntity::getSessionId));
+
+            for (Map.Entry<String, List<ReloadPendingFileEntity>> entry : bySession.entrySet()) {
+                String sessionId = entry.getKey();
+                List<ReloadPendingFileEntity> sessionFiles = entry.getValue();
+
+                if (!isEtlFenceCrossed(sessionFiles)) {
+                    // Some files still in pending/staging — keep scanning next cycle
+                    continue;
+                }
+
+                List<ReloadPendingFileEntity> etlComplete = sessionFiles.stream()
+                        .filter(f -> ETL_COMPLETE_STATUSES.contains(f.getFileStatus()))
+                        .toList();
+
+                if (etlComplete.isEmpty()) {
+                    // All files reached terminal states (failed etc.) with no etl_complete rows —
+                    // skip Exensio and let the session finalize directly.
+                    sessionsToFinalize.add(sessionId);
+                    continue;
+                }
+
+                if (exensioProperties.isEnabled()) {
+                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize);
+                } else {
+                    // Exensio disabled: promote all etl_complete files directly to completed.
+                    for (ReloadPendingFileEntity pf : etlComplete) {
+                        pf.setFileStatus("completed");
+                        pf.setResolvedAt(Instant.now());
+                        pendingFileRepository.save(pf);
+                        String schema = exensioProperties.resolvedDbschemaForDestination(pf.getDestinationFolder());
+                        appendEvent(pf.getSessionId(), "file_completed",
+                                buildEtlProcessedMsg(pf, pf.getDestinationFolder(), schema, false),
+                                pf.getRequester(), null);
+                        toRemove.add(pf.getAbsPath());
+                    }
+                    // Delete the newly promoted rows
+                    for (ReloadPendingFileEntity pf : etlComplete) {
+                        pendingFileRepository.deleteById(pf.getAbsPath());
+                    }
+                    pendingFileRepository.flush();
+                    sessionsToFinalize.add(sessionId);
                 }
             }
 
@@ -433,6 +544,104 @@ public class ReloadPendingMonitor {
             pendingFileRepository.flush();
         } catch (Exception e) {
             log.error("[PendingMonitor] Error processing Exensio loading batch: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Fires a single Exensio batch lookup for one session after its ETL fence is crossed.
+     *
+     * <p>Receives only the {@code etl_complete} (or legacy {@code exensio_loading}) files
+     * for this specific session. The DONE/NOT_FOUND/ERROR handling is identical to
+     * {@link #processExensioLoading} — the key difference is that this method operates
+     * on a single session's files rather than a cross-session accumulation.</p>
+     *
+     * <p>After processing, all resolved rows are deleted from the staging table and the
+     * session id is added to {@code sessionsToFinalize} so the caller can finalize the
+     * session in the same scan cycle.</p>
+     *
+     * @param sessionId        the session being confirmed
+     * @param etlCompleteFiles files for this session with status {@code etl_complete} or
+     *                         {@code exensio_loading}
+     * @param sessionsToFinalize mutable set that collects session ids ready for finalization
+     */
+    void triggerExensioForSession(String sessionId,
+                                  List<ReloadPendingFileEntity> etlCompleteFiles,
+                                  Set<String> sessionsToFinalize) {
+        log.info("[PendingMonitor] Triggering Exensio batch for session={} ({} files)",
+                sessionId, etlCompleteFiles.size());
+        try {
+            List<BatchLookupResult.RecordUpdate> updates =
+                    exensioClient.lotWaferLookupBatch(etlCompleteFiles);
+
+            for (BatchLookupResult.RecordUpdate update : updates) {
+                pendingFileRepository.findById(update.absPath()).ifPresent(pf -> {
+                    boolean terminal = false;
+
+                    switch (update.type()) {
+                        case DONE -> {
+                            pf.setFileStatus("completed");
+                            pf.setResolvedAt(Instant.now());
+                            pf.setExensioWaferKey(update.waferKey());
+                            pf.setExensioPgKey(update.pgKey());
+                            String dest = pf.getDestinationFolder() != null
+                                    ? " [" + pf.getDestinationFolder() + "]" : "";
+                            String msg = "Loaded in Exensio" + dest + ": " + pf.getFileName()
+                                    + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey() + ")";
+                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            log.info("[PendingMonitor] Exensio confirmed (session={}): {}", sessionId, pf.getFileName());
+                            terminal = true;
+                        }
+                        case NOT_FOUND -> {
+                            long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
+                            if (elapsed >= exensioProperties.getTimeoutMinutes()) {
+                                pf.setFileStatus("unverified-exensio");
+                                pf.setResolvedAt(Instant.now());
+                                pf.setErrorReason("Not found in Exensio after "
+                                        + exensioProperties.getTimeoutMinutes()
+                                        + " min. ETL completed — please verify in Exensio manually.");
+                                String msg = "ETL complete but not yet confirmed in Exensio: " + pf.getFileName()
+                                        + " (Lot: " + pf.getUserLotId() + ")"
+                                        + " | Destination: " + (pf.getDestinationFolder() != null
+                                                ? pf.getDestinationFolder() : "unknown")
+                                        + " | Please verify in Exensio manually.";
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND");
+                                log.warn("[PendingMonitor] Exensio timeout (session={}): {} — marking unverified",
+                                        sessionId, pf.getFileName());
+                                terminal = true;
+                            }
+                        }
+                        case ERROR -> {
+                            long elapsed = Duration.between(pf.getCreatedAt(), Instant.now()).toMinutes();
+                            if (elapsed >= exensioProperties.getTimeoutMinutes()) {
+                                pf.setFileStatus("unverified-exensio");
+                                pf.setResolvedAt(Instant.now());
+                                pf.setErrorReason("Exensio API error: " + update.errorMessage()
+                                        + ". ETL completed — please verify in Exensio manually.");
+                                String msg = "ETL complete but Exensio API check failed: " + pf.getFileName()
+                                        + " (Lot: " + pf.getUserLotId() + ")"
+                                        + " | Destination: " + (pf.getDestinationFolder() != null
+                                                ? pf.getDestinationFolder() : "unknown")
+                                        + " | API error: " + update.errorMessage()
+                                        + " | Please verify in Exensio manually.";
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR");
+                                log.warn("[PendingMonitor] Exensio API error (session={}): {} — marking unverified",
+                                        sessionId, pf.getFileName());
+                                terminal = true;
+                            }
+                        }
+                    }
+
+                    if (terminal) {
+                        pendingFileRepository.save(pf);
+                        pendingFileRepository.deleteById(pf.getAbsPath());
+                        sessionsToFinalize.add(pf.getSessionId());
+                    }
+                });
+            }
+            pendingFileRepository.flush();
+        } catch (Exception e) {
+            log.error("[PendingMonitor] Error in triggerExensioForSession (session={}): {}",
+                    sessionId, e.getMessage(), e);
         }
     }
 

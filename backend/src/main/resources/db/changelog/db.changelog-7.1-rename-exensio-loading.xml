@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="7.1" author="antigravity">
+        <comment>Rename file_status 'exensio_loading' to 'etl_complete' to better reflect the intermediate state</comment>
+        <update tableName="xfcs_dearchiver_reload_pending_files">
+            <column name="file_status" value="etl_complete"/>
+            <where>file_status = 'exensio_loading'</where>
+        </update>
+    </changeSet>
+
+</databaseChangeLog>

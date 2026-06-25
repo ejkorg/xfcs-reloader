@@ -244,7 +244,7 @@ export interface SearchRow {
             </div>
 
             <!-- Empty state: no results found -->
-            <div class="empty-state" *ngIf="searchResults().length === 0">
+            <div class="empty-state" *ngIf="allSearchResults().length === 0">
               <div class="empty-icon-wrap">
                 <span class="material-icons empty-icon">manage_search</span>
                 <div class="empty-icon-ring"></div>
@@ -274,18 +274,29 @@ export interface SearchRow {
               </app-glass-button>
             </div>
 
+            <!-- Display-limit banner: shown when not all results are visible in the table -->
+            <div class="display-limit-banner" *ngIf="displayLimited()">
+              <span class="material-icons">info_outline</span>
+              <span>
+                Showing <strong>{{ searchResults().length }}</strong> of <strong>{{ allSearchResults().length }}</strong> matching files.
+                The table is capped for performance — but all <strong>{{ allSearchResults().length }}</strong> files can be staged for reload.
+              </span>
+              <app-glass-button variant="secondary" size="small" (clicked)="selectAllFiles()">
+                Select All {{ allSearchResults().length }} Files
+              </app-glass-button>
+            </div>
+
             <!-- Results table when files are found -->
             <app-xfcs-results-table
               *ngIf="searchResults().length > 0"
               [results]="searchResults()"
               [selectedPaths]="selectedFilePaths()"
               (selectionChanged)="onSelectionChanged($event)">
-            </app-xfcs-results-table>
-          </div>
+            </app-xfcs-results-table>          </div>
 
           <div class="pane-footer mt-6">
             <app-glass-button variant="secondary" (clicked)="prevStep()">Back</app-glass-button>
-            <ng-container *ngIf="searchResults().length > 0">
+            <ng-container *ngIf="allSearchResults().length > 0">
               <app-glass-button
                 variant="secondary"
                 [loading]="downloading()"
@@ -430,6 +441,23 @@ export interface SearchRow {
 
     .mt-4 { margin-top: 1rem; }
     .mt-6 { margin-top: 1.5rem; }
+
+    /* Display-limit banner */
+    .display-limit-banner {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      border: 1px solid rgba(251, 191, 36, 0.3);
+      background: rgba(251, 191, 36, 0.07);
+      color: #fbbf24;
+      font-size: 0.82rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+      .material-icons { font-size: 1.1rem; flex-shrink: 0; }
+      span { flex: 1; min-width: 0; }
+    }
 
     /* LOT STATS PANEL */
     .lot-stats-panel {
@@ -826,7 +854,11 @@ export class XfcsStepperComponent implements OnInit {
   );
   
   // Search Results State
+  // allSearchResults holds the full de-duplicated result set returned by the backend.
+  // searchResults holds the display-capped slice shown in the results table.
+  allSearchResults = signal<SearchResult[]>([]);
   searchResults = signal<SearchResult[]>([]);
+  displayLimited = signal<boolean>(false);   // true when results are capped for display
   selectedFiles = signal<SearchResult[]>([]);
   selectedFilePaths = computed(() =>
     this.selectedFiles()
@@ -835,6 +867,7 @@ export class XfcsStepperComponent implements OnInit {
   );
 
   // Lot Statistics (computed from search rows and results)
+  // Uses allSearchResults so stats reflect the full result set, not just what is displayed.
   lotStats = computed(() => {
     // Collect all unique entered lots from all search rows
     const enteredLots = new Set<string>();
@@ -852,16 +885,16 @@ export class XfcsStepperComponent implements OnInit {
       }
     }
 
-    // Collect all unique found lots from search results
+    // Collect all unique found lots from the full result set (uppercased for case-insensitive match)
     const foundLots = new Set<string>();
-    for (const result of this.searchResults()) {
+    for (const result of this.allSearchResults()) {
       const lotId = result.userLotId || result.lotId;
       if (lotId) {
-        foundLots.add(lotId);
+        foundLots.add(lotId.toUpperCase());
       }
     }
 
-    // Compute not-found lots
+    // Compute not-found lots (enteredLots is already uppercased)
     const notFoundLots: string[] = Array.from(enteredLots).filter(lot => !foundLots.has(lot));
 
     return {
@@ -938,8 +971,32 @@ export class XfcsStepperComponent implements OnInit {
             years,
             months,
             lotIds
-          }).pipe(catchError(() => of([])))
-        ).then((results: SearchResult[]) => results.map((r: SearchResult) => ({ ...r, userLotId: lotIds[0] } as SearchResult)));
+          }).pipe(
+            catchError(() => of({ results: [], totalFound: 0, maxResults: 0, displayLimit: 500, limitExceeded: false, displayLimited: false }))
+          )
+        ).then((response: any) => {
+          // Handle both old SearchResult[] and new SearchResponse formats
+          const results = Array.isArray(response) ? response : (response.results || []);
+          const dl: number = response.displayLimit ?? results.length;
+          const wasDisplayLimited: boolean = !!response.displayLimited || results.length > dl;
+          
+          // Show warning if hard search limit was exceeded
+          if (response.limitExceeded) {
+            this.toast.warning(
+              `Search results limited to ${response.maxResults} files. ` +
+              `Total matching: ${response.totalFound}. ` +
+              `Try narrowing your search criteria.`
+            );
+          }
+          
+          return (results as SearchResult[]).map((r: SearchResult) => ({
+            ...r,
+            // Trust the backend's matched lotId; only fall back to lotIds[0] if truly absent.
+            userLotId: r.lotId || lotIds[0],
+            _displayLimit: dl,
+            _displayLimited: wasDisplayLimited
+          } as any));
+        });
       })
       .filter((x: Promise<SearchResult[]> | null): x is Promise<SearchResult[]> => x !== null);
 
@@ -961,7 +1018,23 @@ export class XfcsStepperComponent implements OnInit {
         }
       }
 
-      this.searchResults.set(finalResults);
+      // Determine the effective display limit (use the first result's metadata, or fall back to total count)
+      const firstMeta = (allResults[0] as any);
+      const displayLimit: number = firstMeta?._displayLimit ?? finalResults.length;
+
+      // Store the full set for processing and stats
+      const cleanResults = finalResults.map((r: any) => {
+        const { _displayLimit: _dl, _displayLimited: _dlim, ...clean } = r;
+        return clean as SearchResult;
+      });
+
+      this.allSearchResults.set(cleanResults);
+
+      // Cap what the table renders for UI performance
+      const isDisplayLimited = cleanResults.length > displayLimit;
+      this.displayLimited.set(isDisplayLimited);
+      this.searchResults.set(isDisplayLimited ? cleanResults.slice(0, displayLimit) : cleanResults);
+
       this.selectedFiles.set([]);
       this.searching.set(false);
       this.nextStep();
@@ -1082,10 +1155,14 @@ export class XfcsStepperComponent implements OnInit {
     this.selectedFiles.set(files);
   }
 
+  selectAllFiles(): void {
+    this.selectedFiles.set(this.allSearchResults());
+  }
+
   private getActionableFiles(): SearchResult[] {
     const selected = this.selectedFiles();
     if (selected.length > 0) return selected;
-    return this.searchResults();
+    return this.allSearchResults();
   }
 
   private triggerBrowserDownload(blob: Blob, filename: string): void {
@@ -1192,7 +1269,9 @@ export class XfcsStepperComponent implements OnInit {
     this.environment.set('');
     this.rowIdCounter = 1;
     this.searchRows.set([{ id: 1, lotsRaw: '', lots: [], rejectedLots: [] }]);
+    this.allSearchResults.set([]);
     this.searchResults.set([]);
+    this.displayLimited.set(false);
     this.selectedFiles.set([]);
     this.executionTerminalStatus.set('');
   }

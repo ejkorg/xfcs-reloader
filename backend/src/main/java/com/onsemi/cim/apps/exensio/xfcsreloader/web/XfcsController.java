@@ -89,12 +89,14 @@ public class XfcsController {
     }
 
     @PostMapping("/archive/search")
-    public List<SearchResult> search(@RequestBody SearchCriteria criteria) {
+    public com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.SearchResponse search(@RequestBody SearchCriteria criteria) {
         assertFeatureEnabled();
         log.info("[Xfcs] /archive/search called with criteria: {}", criteria);
         List<SearchResult> results = archiveSearchService.search(criteria);
         log.info("[Xfcs] /archive/search returned {} results", results.size());
-        return results;
+        int maxResults = xfcsProperties.getSearchMaxResults();
+        int displayLimit = xfcsProperties.getSearchDisplayLimit();
+        return com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.SearchResponse.of(results, results.size(), maxResults, displayLimit);
     }
 
     @GetMapping("/archive/find-lots")

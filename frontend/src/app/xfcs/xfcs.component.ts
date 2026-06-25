@@ -185,13 +185,31 @@ export class XfcsComponent implements OnInit, OnDestroy {
           site,
           area,
           testerType
-        }).pipe(catchError(() => of([])))
+        }).pipe(catchError(() => of({ results: [], totalFound: 0, maxResults: 0, limitExceeded: false })))
       );
     });
 
     Promise.all(requests).then(resArrays => {
       this.searching = false;
-      const allResults = resArrays.flat();
+      
+      // Track limit info across all searches
+      let totalLimitExceeded = false;
+      let maxResults = 0;
+      let totalSearched = 0;
+      
+      const allResults = resArrays.flatMap(response => {
+        // Handle both old SearchResult[] and new SearchResponse formats
+        if (Array.isArray(response)) {
+          return response;
+        }
+        const results = response.results || [];
+        if (response.limitExceeded) {
+          totalLimitExceeded = true;
+        }
+        maxResults = Math.max(maxResults, response.maxResults || 0);
+        totalSearched += response.totalFound || results.length;
+        return results;
+      });
 
       const uniquePaths = new Set<string>();
       const finalResults: SearchResult[] = [];
@@ -215,7 +233,14 @@ export class XfcsComponent implements OnInit, OnDestroy {
 
       const ref = this.dialog.open(SearchResultsDialogComponent, {
         width: '700px',
-        data: { total: finalResults.length, foundLots, missingLots }
+        data: { 
+          total: finalResults.length, 
+          totalFound: totalSearched,
+          maxResults: maxResults,
+          limitExceeded: totalLimitExceeded,
+          foundLots, 
+          missingLots 
+        }
       });
       ref.afterClosed().subscribe((keep: boolean) => {
         if (!keep) {

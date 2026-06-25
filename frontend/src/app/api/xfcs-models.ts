@@ -43,6 +43,15 @@ export interface SearchResult {
   userLotId?: string;
 }
 
+export interface SearchResponse {
+  results: SearchResult[];
+  totalFound: number;
+  maxResults: number;
+  displayLimit: number;
+  limitExceeded: boolean;
+  displayLimited: boolean;
+}
+
 export interface DownloadFilesRequest {
   paths: string[];
 }

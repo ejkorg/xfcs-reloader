@@ -6,6 +6,9 @@ import { GlassIconComponent } from '../shared/components/glass-icon.component';
 
 type SearchResultsDialogData = {
   total: number;
+  totalFound: number;
+  maxResults: number;
+  limitExceeded: boolean;
   foundLots: string[];
   missingLots: string[];
 };
@@ -23,7 +26,11 @@ type SearchResultsDialogData = {
     </div>
 
     <div class="dialog-content">
-      <p *ngIf="data.total > 0">Found <strong>{{ data.total }}</strong> file(s) matching your criteria.</p>
+      <p *ngIf="data.total > 0">Found <strong>{{ data.total }}</strong> file(s) matching your criteria
+        <span *ngIf="data.limitExceeded" class="limit-warning">
+          (limited to {{ data.maxResults }}, {{ data.totalFound - data.total }} more available)
+        </span>.
+      </p>
       <p *ngIf="data.total === 0">No archived files were found for the selected criteria.</p>
 
       <div class="lot-grid" *ngIf="data.foundLots.length">
@@ -61,6 +68,8 @@ type SearchResultsDialogData = {
     
     .dialog-content { padding: 0 0 1.25rem 0; color: var(--text-muted); line-height: 1.5; font-size: 0.95rem; }
     
+    .limit-warning { display: inline-block; margin-left: 0.5rem; padding: 0.25rem 0.6rem; border-radius: 4px; background: rgba(245,158,11,0.15); color: #f59e0b; font-size: 0.85rem; font-weight: 600; }
+    
     .lot-grid { margin-top: 1.25rem; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.04); padding: 1.1rem; border-radius: 14px; }
     :host-context(body.light-theme) .lot-grid { background: rgba(0,0,0,0.02); border-color: rgba(0,0,0,0.05); }
     
@@ -85,6 +94,9 @@ export class SearchResultsDialogComponent {
   ) {
     this.data = {
       total: rawData?.total ?? 0,
+      totalFound: rawData?.totalFound ?? rawData?.total ?? 0,
+      maxResults: rawData?.maxResults ?? 0,
+      limitExceeded: rawData?.limitExceeded ?? false,
       foundLots: rawData?.foundLots ?? [],
       missingLots: rawData?.missingLots ?? []
     };

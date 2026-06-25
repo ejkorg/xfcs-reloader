@@ -59,7 +59,8 @@ import { ToastService } from '../shared/services/toast.service';
             <th class="file-col">File</th>
             <th>Status</th>
             <th>Event</th>
-            <th>Updated</th>
+            <th>Staged</th>
+            <th>Finished</th>
             <th *ngIf="!embedded">Destination</th>
             <th *ngIf="!embedded">Error</th>
           </tr>
@@ -82,7 +83,8 @@ import { ToastService } from '../shared/services/toast.service';
                 </div>
               </td>
               <td class="text-sm text-muted">{{ fileEventLabel(f) }}</td>
-              <td class="text-sm text-muted">{{ (f.resolvedAt || f.createdAt) | date:'short' }}</td>
+              <td class="text-sm text-muted">{{ f.createdAt | date:'short' }}</td>
+              <td class="text-sm text-muted">{{ f.resolvedAt | date:'short' || '—' }}</td>
               <td *ngIf="!embedded">
                 <span class="dest-badge" *ngIf="f.destinationFolder">{{ f.destinationFolder }}</span>
               </td>
@@ -92,7 +94,7 @@ import { ToastService } from '../shared/services/toast.service';
             </tr>
           </ng-container>
           <tr *ngIf="paginatedFiles().length === 0 && !loading()">
-            <td [attr.colspan]="embedded ? 4 : 6" class="empty-state">{{ loading() ? 'Loading files...' : 'No files found.' }}</td>
+            <td [attr.colspan]="embedded ? 5 : 7" class="empty-state">{{ loading() ? 'Loading files...' : 'No files found.' }}</td>
           </tr>
           </tbody>
         </table>

@@ -3,7 +3,7 @@ import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from '../auth/auth.service';
-import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, FileCoveragePoint, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResult } from './xfcs-models';
+import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, FileCoveragePoint, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResponse, SearchResult } from './xfcs-models';
 
 @Injectable({ providedIn: 'root' })
 export class XfcsApiService {
@@ -15,8 +15,8 @@ export class XfcsApiService {
     return this.http.get<EnvYearRange[]>(`${this.base}/envs`, { headers: this.auth.getAuthHeaders() ?? undefined });
   }
 
-  searchArchive(criteria: SearchCriteria): Observable<SearchResult[]> {
-    return this.http.post<SearchResult[]>(`${this.base}/archive/search`, criteria, { headers: this.auth.getAuthHeaders() ?? undefined });
+  searchArchive(criteria: SearchCriteria): Observable<SearchResponse> {
+    return this.http.post<SearchResponse>(`${this.base}/archive/search`, criteria, { headers: this.auth.getAuthHeaders() ?? undefined });
   }
 
   downloadFiles(req: DownloadFilesRequest): Observable<HttpResponse<Blob>> {

@@ -4,6 +4,7 @@ import com.onsemi.cim.apps.exensio.xfcsreloader.entity.ReloadPendingFileEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -23,4 +24,7 @@ public interface ReloadPendingFileRepository extends JpaRepository<ReloadPending
 
     /** Find pending files by file status (e.g. "exensio_loading") */
     List<ReloadPendingFileEntity> findByFileStatus(String fileStatus);
+
+    /** Find all pending files for a session that have one of the given statuses. */
+    List<ReloadPendingFileEntity> findBySessionIdAndFileStatusIn(String sessionId, Collection<String> statuses);
 }
