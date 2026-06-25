@@ -298,10 +298,30 @@ public class ReloadPendingMonitor {
                     }
 
                     if (foundStr.contains("/processed/") || foundStr.endsWith("/processed")) {
-                        // Determine output destination from the --out path in the .cfg file.
-                        // The ETL writes output files to outboxPath/PRODUCTION/ or outboxPath/SANDBOX/.
-                        // We check which sub-folder contains a file whose name includes the input filename stem.
-                        String destination = detectDestinationFromOutbox(environment, pf.getFileName());
+                        // Determine output destination from pp_log first (most reliable),
+                        // falling back to outbox directory scanning.
+                        String destination = null;
+
+                        if (ppLogQueryService != null) {
+                            try {
+                                PpLogQueryService.PpLogResult ppResult = ppLogQueryService.queryByLotAndEnv(
+                                        pf.getUserLotId(), pf.getEnvironment(), pf.getFileName());
+                                if (ppResult != null && ppResult.destination() != null
+                                        && !ppResult.destination().isBlank()
+                                        && !"NOT_PROCESSED".equals(ppResult.destination())) {
+                                    destination = ppResult.destination();
+                                    log.debug("[PendingMonitor] Destination '{}' resolved via pp_log for: {}",
+                                            destination, pf.getFileName());
+                                }
+                            } catch (Exception e) {
+                                log.debug("[PendingMonitor] pp_log destination lookup failed for {}: {}",
+                                        pf.getFileName(), e.getMessage());
+                            }
+                        }
+
+                        if (destination == null) {
+                            destination = detectDestinationFromOutbox(environment, pf.getFileName());
+                        }
 
                         if (exensioProperties.isEnabled()) {
                             // Only transition to etl_complete once — avoid spamming events on every scan cycle.
@@ -570,6 +590,30 @@ public class ReloadPendingMonitor {
         log.info("[PendingMonitor] Triggering Exensio batch for session={} ({} files)",
                 sessionId, etlCompleteFiles.size());
         try {
+            // Best-effort: fill in missing destinationFolder from pp_log before calling Exensio.
+            // This covers files that transitioned to etl_complete before pp_log was wired in,
+            // or where detectDestinationFromOutbox() returned null on the first scan cycle.
+            if (ppLogQueryService != null) {
+                for (ReloadPendingFileEntity pf : etlCompleteFiles) {
+                    if (pf.getDestinationFolder() != null) continue;
+                    try {
+                        PpLogQueryService.PpLogResult ppResult = ppLogQueryService.queryByLotAndEnv(
+                                pf.getUserLotId(), pf.getEnvironment(), pf.getFileName());
+                        if (ppResult != null && ppResult.destination() != null
+                                && !ppResult.destination().isBlank()
+                                && !"NOT_PROCESSED".equals(ppResult.destination())) {
+                            pf.setDestinationFolder(ppResult.destination());
+                            pendingFileRepository.save(pf);
+                            log.info("[PendingMonitor] Late-resolved destination='{}' via pp_log for: {}",
+                                    ppResult.destination(), pf.getFileName());
+                        }
+                    } catch (Exception e) {
+                        log.debug("[PendingMonitor] pp_log late-resolve failed for {}: {}",
+                                pf.getFileName(), e.getMessage());
+                    }
+                }
+            }
+
             List<BatchLookupResult.RecordUpdate> updates =
                     exensioClient.lotWaferLookupBatch(etlCompleteFiles);
 

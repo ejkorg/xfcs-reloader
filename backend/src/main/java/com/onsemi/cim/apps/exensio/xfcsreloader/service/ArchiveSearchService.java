@@ -192,12 +192,14 @@ public class ArchiveSearchService {
                     String fileName = p.getFileName().toString();
                     String lower = fileName.toLowerCase(Locale.ROOT);
 
-                    // Quick extension check - allow .log, .log.gz, .gz, etc.
-                    boolean hasValidExt = lower.endsWith(".dat") || lower.endsWith(".txt") || lower.endsWith(".zip") 
-                        || lower.endsWith(".csv") || lower.endsWith(".gz") || lower.endsWith(".lsr")
-                        || lower.contains(".log"); // match .log even if followed by MD5/gz
-                    
-                    if (!hasValidExt) {
+                    // Skip obvious non-data sidecar files. Everything else matched by the lot
+                    // -iname filter is considered a valid archive file — using an allowlist here
+                    // caused valid extensions like .SPD, .KLARF, .STDF etc. to be dropped.
+                    boolean isSidecar = lower.endsWith(".err") || lower.endsWith(".pid")
+                        || lower.endsWith(".tmp") || lower.endsWith(".lock")
+                        || lower.endsWith(".md5") || lower.endsWith(".md5sum");
+
+                    if (isSidecar) {
                         continue;
                     }
 
@@ -310,11 +312,11 @@ public class ArchiveSearchService {
                 if (!years.isEmpty() && (year == null || !years.contains(year))) continue;
                 if (!months.isEmpty() && (month == null || !months.contains(month))) continue;
 
-                if (!lower.endsWith(".dat") && !lower.endsWith(".txt") && !lower.endsWith(".zip") 
-                    && !lower.endsWith(".csv") && !lower.endsWith(".gz") && !lower.endsWith(".lsr")
-                    && !lower.endsWith(".log")) {
-                    continue;
-                }
+                // Skip sidecar files — accept any extension the lot filter matched.
+                boolean isSidecar = lower.endsWith(".err") || lower.endsWith(".pid")
+                    || lower.endsWith(".tmp") || lower.endsWith(".lock")
+                    || lower.endsWith(".md5") || lower.endsWith(".md5sum");
+                if (isSidecar) continue;
 
                 String displayLot = matchedLotId != null ? matchedLotId : "UNKNOWN";
 
