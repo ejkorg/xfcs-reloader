@@ -903,7 +903,7 @@ export class XfcsStepperComponent implements OnInit {
 
   // Site options: all distinct sites from the full env list (not narrowed)
   siteOptions = computed<GlassOption[]>(() => {
-    const sites = [...new Set(this.envs().map(e => e.siteName).filter(Boolean))].sort();
+    const sites = [...new Set(this.envs().map(e => e.siteName).filter((v): v is string => Boolean(v)))].sort();
     return [
       { value: '', label: 'All Sites' },
       ...sites.map(s => ({ value: s, label: s }))
@@ -915,7 +915,7 @@ export class XfcsStepperComponent implements OnInit {
     const base = this.filterSite()
       ? this.envs().filter(e => e.siteName === this.filterSite())
       : this.envs();
-    const areas = [...new Set(base.map(e => e.areaCode).filter(Boolean))].sort();
+    const areas = [...new Set(base.map(e => e.areaCode).filter((v): v is string => Boolean(v)))].sort();
     return [
       { value: '', label: 'All Areas' },
       ...areas.map(a => ({ value: a, label: a }))
@@ -928,7 +928,7 @@ export class XfcsStepperComponent implements OnInit {
       (!this.filterSite() || e.siteName === this.filterSite()) &&
       (!this.filterArea() || e.areaCode === this.filterArea())
     );
-    const types = [...new Set(base.map(e => e.testerType).filter(Boolean))].sort();
+    const types = [...new Set(base.map(e => e.testerType).filter((v): v is string => Boolean(v)))].sort();
     return [
       { value: '', label: 'All Tester Types' },
       ...types.map(t => ({ value: t, label: t }))
