@@ -72,8 +72,9 @@ exensio:
 xfcs:
   feature-enabled: ${XFCS_FEATURE_ENABLED:true}
   archives-root: ${XFCS_ARCHIVES_ROOT:/archives}
-  search-max-results: ${XFCS_SEARCH_MAX_RESULTS:200}
-  search-max-files-scan: ${XFCS_SEARCH_MAX_FILES_SCAN:20000}
+  search-max-results: ${XFCS_SEARCH_MAX_RESULTS:5000}
+  search-max-files-scan: ${XFCS_SEARCH_MAX_FILES_SCAN:50000}
+  search-display-limit: ${XFCS_SEARCH_DISPLAY_LIMIT:500}
   env-conf-cache-ttl-sec: ${XFCS_ENV_CONF_CACHE_TTL_SEC:120}
   env-conf-retries: ${XFCS_ENV_CONF_RETRIES:2}
   env-conf-retry-backoff-ms: ${XFCS_ENV_CONF_RETRY_BACKOFF_MS:500}
