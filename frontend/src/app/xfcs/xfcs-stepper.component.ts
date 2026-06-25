@@ -83,6 +83,31 @@ export interface SearchRow {
           </div>
 
           <div class="form-container">
+            <!-- Filter Row: Site, Area, Tester Type -->
+            <div class="filter-row">
+              <app-glass-select
+                label="Site"
+                placeholder="All Sites"
+                [options]="siteOptions()"
+                [ngModel]="filterSite()"
+                (ngModelChange)="onFilterSiteChange($event)">
+              </app-glass-select>
+              <app-glass-select
+                label="Area"
+                placeholder="All Areas"
+                [options]="areaOptions()"
+                [ngModel]="filterArea()"
+                (ngModelChange)="onFilterAreaChange($event)">
+              </app-glass-select>
+              <app-glass-select
+                label="Tester Type"
+                placeholder="All Tester Types"
+                [options]="testerTypeOptions()"
+                [ngModel]="filterTesterType()"
+                (ngModelChange)="onFilterTesterTypeChange($event)">
+              </app-glass-select>
+            </div>
+
             <app-glass-select
               label="Environment"
               placeholder="Select an environment"
@@ -90,7 +115,7 @@ export interface SearchRow {
               [searchable]="true"
               [options]="envOptions()"
               [ngModel]="environment()"
-              (ngModelChange)="environment.set($event)">
+              (ngModelChange)="onEnvironmentChange($event)">
             </app-glass-select>
 
             <!-- Read-only env metadata — populated automatically from the selected environment -->
@@ -434,6 +459,20 @@ export interface SearchRow {
     .pane-header p { margin: 0; color: var(--text-muted); line-height: 1.5; }
 
     .form-container { display: flex; flex-direction: column; gap: 1.5rem; }
+    
+    /* Filter Row Styles */
+    .filter-row { 
+      display: grid; 
+      grid-template-columns: repeat(3, 1fr); 
+      gap: 1rem; 
+    }
+    
+    @media (max-width: 768px) {
+      .filter-row { 
+        grid-template-columns: 1fr; 
+      }
+    }
+
     .pane-footer { display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 1.5rem; }
     .pane-footer.split { justify-content: space-between; }
     .monitor-container { display: flex; flex-direction: column; gap: 1rem; }
@@ -848,6 +887,54 @@ export class XfcsStepperComponent implements OnInit {
   searchRows = signal<SearchRow[]>([{ id: 1, lotsRaw: '', lots: [], rejectedLots: [] }]);
   envs = signal<EnvYearRange[]>([]);
 
+  // Filter signals (default to empty string = "All")
+  filterSite = signal<string>('');
+  filterArea = signal<string>('');
+  filterTesterType = signal<string>('');
+
+  // Filtered environments based on all three active filters
+  filteredEnvs = computed(() => {
+    return this.envs().filter(e =>
+      (!this.filterSite()       || e.siteName   === this.filterSite()) &&
+      (!this.filterArea()       || e.areaCode   === this.filterArea()) &&
+      (!this.filterTesterType() || e.testerType === this.filterTesterType())
+    );
+  });
+
+  // Site options: all distinct sites from the full env list (not narrowed)
+  siteOptions = computed<GlassOption[]>(() => {
+    const sites = [...new Set(this.envs().map(e => e.siteName).filter(Boolean))].sort();
+    return [
+      { value: '', label: 'All Sites' },
+      ...sites.map(s => ({ value: s, label: s }))
+    ];
+  });
+
+  // Area options: narrowed by current site filter (or all if site not selected)
+  areaOptions = computed<GlassOption[]>(() => {
+    const base = this.filterSite()
+      ? this.envs().filter(e => e.siteName === this.filterSite())
+      : this.envs();
+    const areas = [...new Set(base.map(e => e.areaCode).filter(Boolean))].sort();
+    return [
+      { value: '', label: 'All Areas' },
+      ...areas.map(a => ({ value: a, label: a }))
+    ];
+  });
+
+  // Tester type options: narrowed by current site + area filters
+  testerTypeOptions = computed<GlassOption[]>(() => {
+    const base = this.envs().filter(e =>
+      (!this.filterSite() || e.siteName === this.filterSite()) &&
+      (!this.filterArea() || e.areaCode === this.filterArea())
+    );
+    const types = [...new Set(base.map(e => e.testerType).filter(Boolean))].sort();
+    return [
+      { value: '', label: 'All Tester Types' },
+      ...types.map(t => ({ value: t, label: t }))
+    ];
+  });
+
   // Derived metadata from the selected environment — read-only, no user interaction
   selectedEnvInfo = computed(() =>
     this.envs().find((e: EnvYearRange) => e.environment === this.environment()) ?? null
@@ -1081,6 +1168,53 @@ export class XfcsStepperComponent implements OnInit {
     });
   }
 
+  // Filter change handlers
+  onEnvironmentChange(value: string): void {
+    this.environment.set(value);
+    if (!value) return;
+    const meta = this.envs().find(e => e.environment === value);
+    if (!meta) return;
+    // Sync filters to the chosen env's metadata (env → filters direction)
+    this.filterSite.set(meta.siteName ?? '');
+    this.filterArea.set(meta.areaCode ?? '');
+    this.filterTesterType.set(meta.testerType ?? '');
+  }
+
+  onFilterSiteChange(value: string): void {
+    this.filterSite.set(value);
+    // Clear area/testerType if no longer valid in new set
+    const newAreaOpts = this.areaOptions().map(o => o.value);
+    if (this.filterArea() && !newAreaOpts.includes(this.filterArea())) {
+      this.filterArea.set('');
+    }
+    const newTypeOpts = this.testerTypeOptions().map(o => o.value);
+    if (this.filterTesterType() && !newTypeOpts.includes(this.filterTesterType())) {
+      this.filterTesterType.set('');
+    }
+    // Clear env if no longer in filtered set
+    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
+      this.environment.set('');
+    }
+  }
+
+  onFilterAreaChange(value: string): void {
+    this.filterArea.set(value);
+    const newTypeOpts = this.testerTypeOptions().map(o => o.value);
+    if (this.filterTesterType() && !newTypeOpts.includes(this.filterTesterType())) {
+      this.filterTesterType.set('');
+    }
+    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
+      this.environment.set('');
+    }
+  }
+
+  onFilterTesterTypeChange(value: string): void {
+    this.filterTesterType.set(value);
+    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
+      this.environment.set('');
+    }
+  }
+
   async downloadDiscoveredFiles() {
     const files = this.selectedFiles();
     if (files.length === 0) {
@@ -1267,6 +1401,9 @@ export class XfcsStepperComponent implements OnInit {
 
   resetAll(): void {
     this.environment.set('');
+    this.filterSite.set('');
+    this.filterArea.set('');
+    this.filterTesterType.set('');
     this.rowIdCounter = 1;
     this.searchRows.set([{ id: 1, lotsRaw: '', lots: [], rejectedLots: [] }]);
     this.allSearchResults.set([]);
@@ -1391,7 +1528,7 @@ export class XfcsStepperComponent implements OnInit {
 
   // Options
   envOptions = computed(() => {
-    const all = this.envs();
+    const all = this.filteredEnvs();
     const opts: GlassOption[] = [];
     const standardEnvs = all.filter((e: EnvYearRange) => e.dbCode !== 'edbfound');
     const foundryEnvs = all.filter((e: EnvYearRange) => e.dbCode === 'edbfound');
