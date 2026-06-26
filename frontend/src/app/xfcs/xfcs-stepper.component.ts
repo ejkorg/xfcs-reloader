@@ -135,7 +135,6 @@ export interface SearchRow {
                 </span>
               </ng-template>
             </div>
-            </div>
 
             <div class="search-rows-container mt-4" [class.rows-disabled]="!environment()">
               <div class="disabled-overlay" *ngIf="!environment()">
