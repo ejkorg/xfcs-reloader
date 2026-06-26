@@ -1,4 +1,4 @@
-import { Component, Input, forwardRef, signal, ElementRef, ViewChild, ViewChildren, QueryList, computed } from '@angular/core';
+import { Component, Input, forwardRef, signal, input, ElementRef, ViewChild, ViewChildren, QueryList, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
@@ -72,7 +72,7 @@ export interface GlassOption {
             <mat-icon *ngIf="!isHeader(option) && isSelected(option)" class="check-icon">check</mat-icon>
           </div>
           
-          <div *ngIf="options.length === 0" class="no-options">
+          <div *ngIf="options().length === 0" class="no-options">
             No options available
           </div>
         </div>
@@ -365,7 +365,7 @@ export class GlassSelectComponent implements ControlValueAccessor {
   @Input() prefixIcon: string = '';
   @Input() multiple: boolean = false;
   @Input() error: string | null = null;
-  @Input() options: (GlassOption | string)[] = [];
+  options = input<(GlassOption | string)[]>([]);
   @Input() searchable: boolean = false;
 
   @ViewChild('trigger') triggerElement!: ElementRef;
@@ -379,9 +379,10 @@ export class GlassSelectComponent implements ControlValueAccessor {
   searchText = signal('');
 
   filteredOptions = computed(() => {
+    const opts = this.options();
     const text = this.searchText().toLowerCase();
-    if (!this.searchable || !text) return this.options;
-    return this.options.filter(o => {
+    if (!this.searchable || !text) return opts;
+    return opts.filter(o => {
       if (this.isHeader(o)) return false;
       const keywords = (typeof o === 'object' && o.searchKeywords) ? o.searchKeywords.toLowerCase() : '';
       return this.getOptionLabel(o).toLowerCase().includes(text) || keywords.includes(text);
@@ -456,7 +457,7 @@ export class GlassSelectComponent implements ControlValueAccessor {
         this.toggleDropdown();
         return;
       default:
-        if (event.key.length === 1 && /[a-zA-Z0-9]/.test(event.key) && this.options.length > 0) {
+        if (event.key.length === 1 && /[a-zA-Z0-9]/.test(event.key) && this.options().length > 0) {
           event.preventDefault();
           if (!this.isOpen()) {
             this.toggleDropdown();
@@ -625,13 +626,13 @@ export class GlassSelectComponent implements ControlValueAccessor {
     if (this.multiple) {
       if (!Array.isArray(current) || current.length === 0) return '';
       const labels = current.map((v: any) => {
-        const opt = (this.options as any[]).find(o => this.getOptionValue(o) === v);
+        const opt = (this.options() as any[]).find(o => this.getOptionValue(o) === v);
         return opt ? this.getOptionLabel(opt) : v;
       });
       if (labels.length > 2) return `${labels.length} items selected`;
       return labels.join(', ');
     } else {
-      const opt = (this.options as any[]).find(o => this.getOptionValue(o) === current);
+      const opt = (this.options() as any[]).find(o => this.getOptionValue(o) === current);
       return opt ? this.getOptionLabel(opt) : (typeof current === 'string' ? current : '');
     }
   }
