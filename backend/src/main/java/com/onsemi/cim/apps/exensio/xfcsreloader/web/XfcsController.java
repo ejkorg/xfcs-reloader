@@ -70,6 +70,23 @@ public class XfcsController {
         return envConfigService.loadEnvs();
     }
 
+    /**
+     * Resolves which environments match the given site/area/testerType combination.
+     * All three params are optional — omit to see all. Returns matching EnvYearRange records.
+     */
+    @GetMapping("/envs/resolve")
+    public List<EnvYearRange> resolveEnvs(
+            @RequestParam(required = false) String site,
+            @RequestParam(required = false) String area,
+            @RequestParam(required = false) String testerType) {
+        assertFeatureEnabled();
+        return envConfigService.loadEnvs().stream()
+                .filter(e -> (site == null || site.isBlank() || site.equalsIgnoreCase(e.siteName()))
+                          && (area == null || area.isBlank() || area.equalsIgnoreCase(e.areaCode()))
+                          && (testerType == null || testerType.isBlank() || testerType.equalsIgnoreCase(e.testerType())))
+                .toList();
+    }
+
     @GetMapping("/cache/info")
     public EnvConfCacheInfo cacheInfo() {
         assertFeatureEnabled();

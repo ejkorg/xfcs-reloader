@@ -83,61 +83,58 @@ export interface SearchRow {
           </div>
 
           <div class="form-container">
-            <!-- Filter Row: Site, Area, Tester Type -->
+            <!-- Site / Area / Tester Type � environment resolves automatically -->
             <div class="filter-row">
               <app-glass-select
                 label="Site"
-                placeholder="All Sites"
+                placeholder="Select site"
                 [options]="siteOptions()"
                 [ngModel]="filterSite()"
                 (ngModelChange)="onFilterSiteChange($event)">
               </app-glass-select>
               <app-glass-select
                 label="Area"
-                placeholder="All Areas"
+                placeholder="Select area"
                 [options]="areaOptions()"
+                [disabled]="!filterSite()"
                 [ngModel]="filterArea()"
                 (ngModelChange)="onFilterAreaChange($event)">
               </app-glass-select>
               <app-glass-select
                 label="Tester Type"
-                placeholder="All Tester Types"
+                placeholder="Select tester type"
                 [options]="testerTypeOptions()"
+                [disabled]="!filterArea()"
                 [ngModel]="filterTesterType()"
                 (ngModelChange)="onFilterTesterTypeChange($event)">
               </app-glass-select>
             </div>
 
+            <!-- Disambiguation: only shown when multiple envs match all 3 filters -->
             <app-glass-select
-              label="Environment"
-              placeholder="Select an environment"
+              *ngIf="resolveStatus() === 'ambiguous'"
+              label="Environment (multiple matches � pick one)"
+              placeholder="Select environment"
               prefixIcon="dataset"
-              [searchable]="true"
-              [options]="envOptions()"
+              [options]="resolvedEnvOptions()"
               [ngModel]="environment()"
-              (ngModelChange)="onEnvironmentChange($event)">
+              (ngModelChange)="environment.set($event)">
             </app-glass-select>
 
-            <!-- Read-only env metadata — populated automatically from the selected environment -->
-            <div class="env-meta-grid mt-4" [class.has-env]="!!selectedEnvInfo()">
-              <div class="env-meta-chip">
-                <span class="meta-label">Site</span>
-                <span class="meta-value" [class.empty]="!selectedEnvInfo()?.siteName">
-                  {{ selectedEnvInfo()?.siteName || '—' }}
+            <!-- Resolved environment confirmation bar -->
+            <div class="env-resolved-bar" [class.is-resolved]="!!environment()">
+              <ng-container *ngIf="environment(); else envPending">
+                <span class="material-icons resolved-icon">check_circle</span>
+                <span class="resolved-label">Environment resolved:</span>
+                <span class="resolved-env">{{ environment() }}</span>
+              </ng-container>
+              <ng-template #envPending>
+                <span class="material-icons pending-icon">pending</span>
+                <span class="pending-label">
+                  {{ !filterSite() ? 'Select a site to begin' : !filterArea() ? 'Select an area' : !filterTesterType() ? 'Select a tester type' : 'No environment found for this combination' }}
                 </span>
-              </div>
-              <div class="env-meta-chip">
-                <span class="meta-label">Area</span>
-                <span class="meta-value" [class.empty]="!selectedEnvInfo()?.areaCode">
-                  {{ selectedEnvInfo()?.areaCode || '—' }}
-                </span>
-              </div>
-              <div class="env-meta-chip">
-                <span class="meta-label">Tester Type</span>
-                <span class="meta-value" [class.empty]="!selectedEnvInfo()?.testerType">
-                  {{ selectedEnvInfo()?.testerType || '—' }}
-                </span>
-              </div>
+              </ng-template>
+            </div>
             </div>
 
             <div class="search-rows-container mt-4" [class.rows-disabled]="!environment()">
@@ -472,6 +469,29 @@ export interface SearchRow {
         grid-template-columns: 1fr; 
       }
     }
+
+    /* Resolved environment bar */
+    .env-resolved-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.02);
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      min-height: 48px;
+    }
+    .env-resolved-bar.is-resolved {
+      border-color: rgba(16, 185, 129, 0.35);
+      background: rgba(16, 185, 129, 0.06);
+    }
+    .resolved-icon { font-size: 1.1rem; color: #10b981; }
+    .resolved-label { color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; }
+    .resolved-env { color: #fff; font-weight: 700; font-family: monospace; font-size: 0.95rem; }
+    .pending-icon { font-size: 1.1rem; color: var(--text-muted); opacity: 0.5; }
+    .pending-label { color: var(--text-muted); font-style: italic; font-size: 0.85rem; }
 
     .pane-footer { display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 1.5rem; }
     .pane-footer.split { justify-content: space-between; }
@@ -892,47 +912,60 @@ export class XfcsStepperComponent implements OnInit {
   filterArea = signal<string>('');
   filterTesterType = signal<string>('');
 
-  // Filtered environments based on all three active filters
-  filteredEnvs = computed(() => {
-    return this.envs().filter(e =>
-      (!this.filterSite()       || e.siteName   === this.filterSite()) &&
-      (!this.filterArea()       || e.areaCode   === this.filterArea()) &&
-      (!this.filterTesterType() || e.testerType === this.filterTesterType())
+  // Candidate environments after all 3 filters applied — used for auto-resolve + disambiguation
+  resolvedEnvs = computed<EnvYearRange[]>(() => {
+    const all = this.envs();
+    const site = this.filterSite();
+    const area = this.filterArea();
+    const type = this.filterTesterType();
+    if (!site && !area && !type) return [];
+    return all.filter(e =>
+      (!site || e.siteName === site) &&
+      (!area || e.areaCode === area) &&
+      (!type || e.testerType === type)
     );
   });
 
-  // Site options: all distinct sites from the full env list (not narrowed)
-  siteOptions = computed<GlassOption[]>(() => {
-    const sites = [...new Set(this.envs().map(e => e.siteName).filter((v): v is string => Boolean(v)))].sort();
-    return [
-      { value: '', label: 'All Sites' },
-      ...sites.map(s => ({ value: s, label: s }))
-    ];
+  // Auto-set environment when exactly one match; clear when filters change and current env no longer matches
+  resolveStatus = computed<'none' | 'resolved' | 'ambiguous'>(() => {
+    const candidates = this.resolvedEnvs();
+    const site = this.filterSite();
+    const area = this.filterArea();
+    const type = this.filterTesterType();
+    if (!site || !area || !type) return 'none';
+    if (candidates.length === 1) return 'resolved';
+    if (candidates.length > 1) return 'ambiguous';
+    return 'none';
   });
 
-  // Area options: narrowed by current site filter (or all if site not selected)
+  // Site options: all distinct siteName values from full env list
+  siteOptions = computed<GlassOption[]>(() => {
+    const sites = [...new Set(this.envs().map(e => e.siteName).filter((v): v is string => Boolean(v)))].sort();
+    return sites.map(s => ({ value: s, label: s }));
+  });
+
+  // Flat options for the disambiguation select (when multiple envs match)
+  resolvedEnvOptions = computed<GlassOption[]>(() =>
+    this.resolvedEnvs().map(e => ({ value: e.environment, label: e.environment }))
+  );
+
+  // Area options: narrowed by selected site
   areaOptions = computed<GlassOption[]>(() => {
     const base = this.filterSite()
       ? this.envs().filter(e => e.siteName === this.filterSite())
       : this.envs();
     const areas = [...new Set(base.map(e => e.areaCode).filter((v): v is string => Boolean(v)))].sort();
-    return [
-      { value: '', label: 'All Areas' },
-      ...areas.map(a => ({ value: a, label: a }))
-    ];
+    return areas.map(a => ({ value: a, label: a }));
   });
 
-  // Tester type options: narrowed by current site + area filters
+  // Tester type options: narrowed by selected site + area
   testerTypeOptions = computed<GlassOption[]>(() => {
     const base = this.envs().filter(e =>
       (!this.filterSite() || e.siteName === this.filterSite()) &&
       (!this.filterArea() || e.areaCode === this.filterArea())
     );
     const types = [...new Set(base.map(e => e.testerType).filter((v): v is string => Boolean(v)))].sort();
-    return [
-      { value: '', label: 'All Tester Types' },
-      ...types.map(t => ({ value: t, label: t }))
-    ];
+    return types.map(t => ({ value: t, label: t }));
   });
 
   // Derived metadata from the selected environment — read-only, no user interaction
@@ -1168,49 +1201,39 @@ export class XfcsStepperComponent implements OnInit {
     });
   }
 
-  // Filter change handlers
-  onEnvironmentChange(value: string): void {
-    this.environment.set(value);
-    if (!value) return;
-    const meta = this.envs().find(e => e.environment === value);
-    if (!meta) return;
-    // Sync filters to the chosen env's metadata (env → filters direction)
-    this.filterSite.set(meta.siteName ?? '');
-    this.filterArea.set(meta.areaCode ?? '');
-    this.filterTesterType.set(meta.testerType ?? '');
-  }
-
+  // Filter change handlers — cascading, auto-resolve
   onFilterSiteChange(value: string): void {
     this.filterSite.set(value);
-    // Clear area/testerType if no longer valid in new set
-    const newAreaOpts = this.areaOptions().map(o => o.value);
-    if (this.filterArea() && !newAreaOpts.includes(this.filterArea())) {
-      this.filterArea.set('');
-    }
-    const newTypeOpts = this.testerTypeOptions().map(o => o.value);
-    if (this.filterTesterType() && !newTypeOpts.includes(this.filterTesterType())) {
-      this.filterTesterType.set('');
-    }
-    // Clear env if no longer in filtered set
-    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
-      this.environment.set('');
-    }
+    // Downstream cascade: clear area/testerType if not valid in new set
+    const validAreas = this.areaOptions().map(o => o.value);
+    if (!validAreas.includes(this.filterArea())) this.filterArea.set('');
+    const validTypes = this.testerTypeOptions().map(o => o.value);
+    if (!validTypes.includes(this.filterTesterType())) this.filterTesterType.set('');
+    this._autoResolve();
   }
 
   onFilterAreaChange(value: string): void {
     this.filterArea.set(value);
-    const newTypeOpts = this.testerTypeOptions().map(o => o.value);
-    if (this.filterTesterType() && !newTypeOpts.includes(this.filterTesterType())) {
-      this.filterTesterType.set('');
-    }
-    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
-      this.environment.set('');
-    }
+    const validTypes = this.testerTypeOptions().map(o => o.value);
+    if (!validTypes.includes(this.filterTesterType())) this.filterTesterType.set('');
+    this._autoResolve();
   }
 
   onFilterTesterTypeChange(value: string): void {
     this.filterTesterType.set(value);
-    if (this.environment() && !this.filteredEnvs().some(e => e.environment === this.environment())) {
+    this._autoResolve();
+  }
+
+  onDisambiguateEnv(value: string): void {
+    this.environment.set(value);
+  }
+
+  private _autoResolve(): void {
+    const candidates = this.resolvedEnvs();
+    if (candidates.length === 1) {
+      this.environment.set(candidates[0].environment);
+    } else {
+      // Multiple matches or no matches — clear until user disambiguates
       this.environment.set('');
     }
   }
@@ -1527,37 +1550,6 @@ export class XfcsStepperComponent implements OnInit {
   }
 
   // Options
-  envOptions = computed(() => {
-    const all = this.filteredEnvs();
-    const opts: GlassOption[] = [];
-    const standardEnvs = all.filter((e: EnvYearRange) => e.dbCode !== 'edbfound');
-    const foundryEnvs = all.filter((e: EnvYearRange) => e.dbCode === 'edbfound');
-
-    if (standardEnvs.length > 0) {
-      opts.push({ value: '', label: 'STANDARD PLANTS', isGroupHeader: true, indentLevel: 0 });
-      const sites = Array.from(new Set<string>(standardEnvs.map((e: EnvYearRange) => e.siteName || 'Unknown')));
-      for (const s of sites) {
-        opts.push({ value: '', label: s, isGroupHeader: true, indentLevel: 1 });
-        const siteEnvs = standardEnvs.filter((e: EnvYearRange) => (e.siteName || 'Unknown') === s);
-        const procs = Array.from(new Set<string>(siteEnvs.map((e: EnvYearRange) => e.processGroup || 'OTHERS')));
-        for (const p of procs) {
-          opts.push({ value: '', label: p, isGroupHeader: true, indentLevel: 2 });
-          siteEnvs.filter((e: EnvYearRange) => (e.processGroup || 'OTHERS') === p).forEach((leaf: EnvYearRange) => {
-            opts.push({ value: leaf.environment, label: leaf.environment, indentLevel: 3 });
-          });
-        }
-      }
-    }
-    
-    if (foundryEnvs.length > 0) {
-      opts.push({ value: '', label: 'FOUNDRY', isGroupHeader: true, indentLevel: 0 });
-      foundryEnvs.forEach((e: EnvYearRange) => {
-         opts.push({ value: e.environment, label: e.environment, indentLevel: 1 });
-      });
-    }
-
-    return opts;
-  });
 
   yearOptions = computed(() => {
     const env = this.envs().find((e: EnvYearRange) => e.environment === this.environment());

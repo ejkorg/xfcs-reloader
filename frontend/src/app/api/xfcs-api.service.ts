@@ -15,6 +15,17 @@ export class XfcsApiService {
     return this.http.get<EnvYearRange[]>(`${this.base}/envs`, { headers: this.auth.getAuthHeaders() ?? undefined });
   }
 
+  resolveEnvs(site?: string, area?: string, testerType?: string): Observable<EnvYearRange[]> {
+    const params: Record<string, string> = {};
+    if (site) params['site'] = site;
+    if (area) params['area'] = area;
+    if (testerType) params['testerType'] = testerType;
+    return this.http.get<EnvYearRange[]>(`${this.base}/envs/resolve`, {
+      headers: this.auth.getAuthHeaders() ?? undefined,
+      params
+    });
+  }
+
   searchArchive(criteria: SearchCriteria): Observable<SearchResponse> {
     return this.http.post<SearchResponse>(`${this.base}/archive/search`, criteria, { headers: this.auth.getAuthHeaders() ?? undefined });
   }
