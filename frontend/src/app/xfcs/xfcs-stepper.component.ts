@@ -9,8 +9,9 @@ import { GlassIconComponent } from '../shared/components/glass-icon.component';
 import { XfcsResultsTableComponent } from './xfcs-results-table.component';
 import { XfcsSessionMonitorComponent } from './xfcs-session-monitor.component';
 import { XfcsFileMonitorComponent } from './xfcs-file-monitor.component';
+import { ExensioPreCheckDialogComponent } from './exensio-precheck-dialog.component';
 import { XfcsApiService } from '../api/xfcs-api.service';
-import { EnvYearRange, ReloadRequest, SearchCriteria, SearchResult, ReloadStatus, ReloadSession } from '../api/xfcs-models';
+import { EnvYearRange, ExensioPreCheckRequest, ExensioPreCheckResponse, ReloadRequest, SearchCriteria, SearchResult, ReloadStatus, ReloadSession } from '../api/xfcs-models';
 import { ToastService } from '../shared/services/toast.service';
 
 export interface SearchRow {
@@ -34,7 +35,8 @@ export interface SearchRow {
     GlassIconComponent,
     XfcsResultsTableComponent,
     XfcsSessionMonitorComponent,
-    XfcsFileMonitorComponent
+    XfcsFileMonitorComponent,
+    ExensioPreCheckDialogComponent
   ],
   template: `
     <div class="stepper-root">
@@ -68,10 +70,10 @@ export interface SearchRow {
 
       <main class="stepper-content glass-panel">
         <!-- GLOBAL LOADING OVERLAY -->
-        <div class="loading-overlay" *ngIf="searching() || executing()">
+        <div class="loading-overlay" *ngIf="searching() || executing() || preChecking()">
           <div class="spinner-box">
             <div class="glass-spinner"></div>
-            <p class="loading-msg">{{ searching() ? 'Searching Archives...' : 'Dispatching Session...' }}</p>
+            <p class="loading-msg">{{ preChecking() ? 'Checking Exensio…' : (searching() ? 'Searching Archives...' : 'Dispatching Session...') }}</p>
           </div>
         </div>
  
@@ -210,10 +212,25 @@ export interface SearchRow {
             <app-glass-button variant="secondary" (clicked)="resetAll()">
               Reset All
             </app-glass-button>
-            <app-glass-button variant="primary" [disabled]="!canSearch()" [loading]="searching()" (clicked)="performSearch()">
-              Search Archive →
-            </app-glass-button>
+            <div class="search-footer-right">
+              <label class="precheck-toggle">
+                <input type="checkbox" [checked]="preCheckEnabled()" (change)="onPreCheckToggle($any($event.target).checked)">
+                <span>Check Exensio before searching</span>
+              </label>
+              <app-glass-button variant="primary" [disabled]="!canSearch()" [loading]="searching() || preChecking()" (clicked)="onSearchClick()">
+                Search Archive →
+              </app-glass-button>
+            </div>
           </div>
+
+          <!-- Exensio Pre-Check Dialog -->
+          <app-exensio-precheck-dialog
+            *ngIf="showPreCheckDlg() && preCheckResult()"
+            [result]="preCheckResult()!"
+            [environment]="environment()"
+            (proceed)="onPreCheckProceed()"
+            (goBack)="onPreCheckGoBack()">
+          </app-exensio-precheck-dialog>
         </div>
 
         <!-- STEP 2: FILE DISCOVERY -->
@@ -494,6 +511,23 @@ export interface SearchRow {
 
     .pane-footer { display: flex; justify-content: flex-end; gap: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 1.5rem; }
     .pane-footer.split { justify-content: space-between; }
+    .search-footer-right { display: flex; align-items: center; gap: 1rem; }
+    .precheck-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+    }
+    .precheck-toggle input[type="checkbox"] {
+      accent-color: var(--accent-color);
+      width: 14px;
+      height: 14px;
+      cursor: pointer;
+    }
     .monitor-container { display: flex; flex-direction: column; gap: 1rem; }
     .file-tracker { width: 100%; }
 
@@ -910,6 +944,19 @@ export class XfcsStepperComponent implements OnInit {
   filterSite = signal<string>('');
   filterArea = signal<string>('');
   filterTesterType = signal<string>('');
+
+  // Pre-check signals (8.1)
+  private readonly PRECHECK_STORAGE_KEY = 'xfcs.precheck.enabled';
+  preChecking     = signal<boolean>(false);
+  preCheckResult  = signal<ExensioPreCheckResponse | null>(null);
+  preCheckStale   = signal<boolean>(false);
+  showPreCheckDlg = signal<boolean>(false);
+  preCheckEnabled = signal<boolean>(
+    (() => {
+      const stored = localStorage.getItem('xfcs.precheck.enabled');
+      return stored === null ? true : stored === 'true';
+    })()
+  );
 
   // Candidate environments after all 3 filters applied — used for auto-resolve + disambiguation
   resolvedEnvs = computed<EnvYearRange[]>(() => {
@@ -1433,6 +1480,9 @@ export class XfcsStepperComponent implements OnInit {
     this.displayLimited.set(false);
     this.selectedFiles.set([]);
     this.executionTerminalStatus.set('');
+    this.preCheckResult.set(null);
+    this.preCheckStale.set(false);
+    this.showPreCheckDlg.set(false);
   }
 
   clearBlockLots(id: number): void {
@@ -1470,10 +1520,66 @@ export class XfcsStepperComponent implements OnInit {
     this.showNotFoundList.update(v => !v);
   }
 
+  // Pre-check handlers
+  onPreCheckToggle(enabled: boolean): void {
+    this.preCheckEnabled.set(enabled);
+    localStorage.setItem(this.PRECHECK_STORAGE_KEY, String(enabled));
+  }
+
+  buildPreCheckRequest(): ExensioPreCheckRequest {
+    const allLots = new Set<string>();
+    const blocks = this.searchRows().map(row => {
+      row.lots.forEach(l => allLots.add(l));
+      return { year: row.year, month: row.month, lots: [...row.lots] };
+    });
+    return { environment: this.environment(), lotIds: [...allLots], blocks };
+  }
+
+  async onSearchClick(): Promise<void> {
+    if (!this.canSearch()) return;
+    if (!this.preCheckEnabled()) {
+      this.performSearch();
+      return;
+    }
+    this.preChecking.set(true);
+    try {
+      const req = this.buildPreCheckRequest();
+      const result = await firstValueFrom(
+        this.api.runExensioPreCheck(req).pipe(catchError(() => of(null)))
+      );
+      this.preCheckResult.set(result);
+      this.preCheckStale.set(false);
+      if (result && !result.error && result.lotsFound.length > 0) {
+        this.showPreCheckDlg.set(true);
+        return;
+      }
+      if (result?.error) {
+        console.warn('[PreCheck] Soft failure:', result.error);
+      }
+    } catch {
+      // soft failure — proceed to archive search
+    } finally {
+      this.preChecking.set(false);
+    }
+    this.performSearch();
+  }
+
+  onPreCheckProceed(): void {
+    this.showPreCheckDlg.set(false);
+    this.performSearch();
+  }
+
+  onPreCheckGoBack(): void {
+    this.showPreCheckDlg.set(false);
+  }
+
   // Row Management
   addRow() { this.searchRows.update((rows: SearchRow[]) => [...rows, { id: ++this.rowIdCounter, lotsRaw: '', lots: [], rejectedLots: [] }]); }
   removeRow(id: number) { this.searchRows.update((rows: SearchRow[]) => rows.filter((r: SearchRow) => r.id !== id)); }
   updateRow(id: number, field: keyof SearchRow, value: any) {
+    if (this.preCheckResult() !== null) {
+      this.preCheckStale.set(true);
+    }
     this.searchRows.update((rows: SearchRow[]) => rows.map((r: SearchRow) => r.id === id ? { ...r, [field]: value } : r));
   }
 
@@ -1506,6 +1612,9 @@ export class XfcsStepperComponent implements OnInit {
   }
 
   removeLot(id: number, lot: string) {
+    if (this.preCheckResult() !== null) {
+      this.preCheckStale.set(true);
+    }
     this.searchRows.update((rows: SearchRow[]) => rows.map((r: SearchRow) =>
       r.id === id ? { ...r, lots: r.lots.filter((l: string) => l !== lot) } : r
     ));

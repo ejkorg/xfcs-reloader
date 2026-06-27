@@ -57,6 +57,13 @@ sso:
   exensio-auth-url: ${SSO_EXENSIO_AUTH_URL:https://usaz15ls088:8080/exensio-reload/api/auth/sso}
   callback-url: ${SSO_CALLBACK_URL:https://usaz15ls088:8080/xfcs-reloader/sso-callback}
 
+snowflake:
+  url: ${SNOW_URL:jdbc:snowflake://placeholder.snowflakecomputing.com/?db=ANALYTICSPRD&schema=MFG}
+  username: ${SNOW_USER:}
+  password: ${SNOW_PASS:}
+  driver-class-name: net.snowflake.client.jdbc.SnowflakeDriver
+  precheck-row-limit: ${SNOW_PRECHECK_ROW_LIMIT:10000}
+
 exensio:
   enabled: ${EXENSIO_ENABLED:false}
   env: ${EXENSIO_ENV:QA}
@@ -68,6 +75,7 @@ exensio:
   dbschema: ${EXENSIO_DBSCHEMA:PRODUCTION}
   timeout-minutes: ${EXENSIO_TIMEOUT_MINUTES:60}
   poll-interval-ms: ${EXENSIO_POLL_INTERVAL_MS:60000}
+  precheck-row-limit: ${EXENSIO_PRECHECK_ROW_LIMIT:10000}
 
 xfcs:
   feature-enabled: ${XFCS_FEATURE_ENABLED:true}

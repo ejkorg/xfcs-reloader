@@ -153,3 +153,27 @@ export interface FileCoveragePoint {
   staged: number;
   failed: number;
 }
+
+export interface PreCheckBlock {
+  year?: number;
+  month?: number;
+  lots: string[];
+}
+
+export interface ExensioPreCheckRequest {
+  environment: string;
+  lotIds: string[];
+  blocks?: PreCheckBlock[];
+}
+
+export interface ExensioPreCheckRow {
+  lotId: string;
+  schemaName: string;  // e.g. "PRODUCTION", "SANDBOX", or "NOT FOUND"
+}
+
+export interface ExensioPreCheckResponse {
+  lotsFound: string[];
+  lotsNotFound: string[];
+  rows: ExensioPreCheckRow[];
+  error?: string;
+}

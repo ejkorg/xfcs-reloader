@@ -3,7 +3,7 @@ import { HttpClient, HttpHeaders, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from '../auth/auth.service';
-import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, FileCoveragePoint, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResponse, SearchResult } from './xfcs-models';
+import { ArchiveLotDetail, DashboardData, DownloadFilesRequest, EnvInfo, EnvYearRange, ExensioPreCheckRequest, ExensioPreCheckResponse, FileCoveragePoint, FileStatusItem, ReloadRequest, ReloadSession, ReloadSessionEvent, ReloadStatus, SearchCriteria, SearchResponse, SearchResult } from './xfcs-models';
 
 @Injectable({ providedIn: 'root' })
 export class XfcsApiService {
@@ -103,5 +103,9 @@ export class XfcsApiService {
       headers: this.auth.getAuthHeaders() ?? undefined,
       params
     });
+  }
+
+  runExensioPreCheck(req: ExensioPreCheckRequest): Observable<ExensioPreCheckResponse> {
+    return this.http.post<ExensioPreCheckResponse>(`${this.base}/lots/exensio-precheck`, req, { headers: this.auth.getAuthHeaders() ?? undefined });
   }
 }

@@ -6,6 +6,7 @@ import com.onsemi.cim.apps.exensio.xfcsreloader.repository.ReloadSessionReposito
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.ArchiveSearchService;
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.EnvConfigService;
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.EnvFolderResolver;
+import com.onsemi.cim.apps.exensio.xfcsreloader.service.ExensioPreCheckService;
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.ReloadSessionService;
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.SseEventBroker;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.*;
@@ -40,6 +41,7 @@ public class XfcsController {
     private final SseEventBroker sseEventBroker;
     private final ReloadSessionRepository reloadSessionRepository;
     private final ReloadPendingFileRepository reloadPendingFileRepository;
+    private final ExensioPreCheckService exensioPreCheckService;
 
     public XfcsController(EnvConfigService envConfigService,
                           ReloadSessionService reloadSessionService,
@@ -48,7 +50,8 @@ public class XfcsController {
                           EnvFolderResolver envFolderResolver,
                           SseEventBroker sseEventBroker,
                           ReloadSessionRepository reloadSessionRepository,
-                          ReloadPendingFileRepository reloadPendingFileRepository) {
+                          ReloadPendingFileRepository reloadPendingFileRepository,
+                          ExensioPreCheckService exensioPreCheckService) {
         this.envConfigService = envConfigService;
         this.reloadSessionService = reloadSessionService;
         this.archiveSearchService = archiveSearchService;
@@ -57,6 +60,7 @@ public class XfcsController {
         this.sseEventBroker = sseEventBroker;
         this.reloadSessionRepository = reloadSessionRepository;
         this.reloadPendingFileRepository = reloadPendingFileRepository;
+        this.exensioPreCheckService = exensioPreCheckService;
     }
 
     @GetMapping("/ping")
@@ -116,8 +120,13 @@ public class XfcsController {
         return com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.SearchResponse.of(results, results.size(), maxResults, displayLimit);
     }
 
-    @GetMapping("/archive/find-lots")
-    public List<ArchiveLotDetail> findLots(@RequestParam("environment") String environment,
+    @PostMapping("/lots/exensio-precheck")
+    public ExensioPreCheckResponse exensioPreCheck(@RequestBody ExensioPreCheckRequest request) {
+        assertFeatureEnabled();
+        return exensioPreCheckService.check(request);
+    }
+
+    @GetMapping("/archive/find-lots")    public List<ArchiveLotDetail> findLots(@RequestParam("environment") String environment,
                                            @RequestParam(value = "lot", required = false) String lot,
                                            @RequestParam(value = "wafer", required = false) String wafer) {
         assertFeatureEnabled();
