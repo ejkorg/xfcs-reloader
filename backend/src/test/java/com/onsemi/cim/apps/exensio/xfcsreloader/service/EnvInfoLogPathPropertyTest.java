@@ -14,6 +14,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
@@ -100,9 +101,12 @@ class EnvInfoLogPathPropertyTest {
         );
         when(envFolderResolver.resolveEnvDetails(anyString())).thenReturn(resolution);
 
+        // Mock ExensioPreCheckService (new dependency)
+        ExensioPreCheckService exensioPreCheckService = mock(ExensioPreCheckService.class);
+
         XfcsController controller = new XfcsController(
                 envConfigService, reloadSessionService, archiveSearchService,
-                props, envFolderResolver, sseEventBroker, sessionRepo, pendingRepo);
+                props, envFolderResolver, sseEventBroker, sessionRepo, pendingRepo, exensioPreCheckService);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> result = (Map<String, Object>) controller.envInfo(envName);
