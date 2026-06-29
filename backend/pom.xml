@@ -97,9 +97,6 @@
             <groupId>net.snowflake</groupId>
             <artifactId>snowflake-jdbc</artifactId>
             <version>3.27.1</version>
-            <!-- Excluded from the fat JAR — must be placed on the server classpath
-                 via -cp or loader.path to avoid Spring Boot 3.x nested-ZIP crash. -->
-            <scope>provided</scope>
         </dependency>
     </dependencies>
 
