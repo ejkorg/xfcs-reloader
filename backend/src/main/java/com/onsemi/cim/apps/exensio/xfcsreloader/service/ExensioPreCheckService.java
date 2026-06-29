@@ -199,8 +199,8 @@ public class ExensioPreCheckService {
                 List<ExensioPreCheckRow> rows = new ArrayList<>();
                 while (rs.next()) {
                     rows.add(new ExensioPreCheckRow(
-                            rs.getString("lot_id"),
-                            rs.getString("schema_loaded")));
+                            rs.getString("LOT_ID"),
+                            rs.getString("SCHEMA_LOADED")));
                 }
                 log.debug("[ExensioPreCheck] Snowflake returned {} rows", rows.size());
                 return partitionResults(rows, request.lotIds());
@@ -366,7 +366,7 @@ public class ExensioPreCheckService {
     public String buildSql(List<String> lotIds, List<PreCheckBlock> blocks) {
         StringBuilder sb = new StringBuilder();
 
-        sb.append("SELECT * FROM (\n");
+        sb.append("SELECT lot_id, end_time, ppid, wafer_id FROM (\n");
         sb.append("  SELECT\n");
         sb.append("    l.lot_id                                                         AS lot_id,\n");
         sb.append("    NVL(TO_CHAR(ol.end_time,'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), '') AS end_time,\n");
