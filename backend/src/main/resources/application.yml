@@ -58,7 +58,7 @@ sso:
   callback-url: ${SSO_CALLBACK_URL:https://usaz15ls088:8080/xfcs-reloader/sso-callback}
 
 snowflake:
-  url: ${SNOW_URL:jdbc:snowflake://placeholder.snowflakecomputing.com/?db=ANALYTICSPRD&schema=MFG}
+  url: ${SNOW_URL:}
   username: ${SNOW_USER:}
   password: ${SNOW_PASS:}
   driver-class-name: net.snowflake.client.jdbc.SnowflakeDriver

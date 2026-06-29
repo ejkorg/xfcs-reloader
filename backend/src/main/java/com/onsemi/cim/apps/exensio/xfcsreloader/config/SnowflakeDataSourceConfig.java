@@ -3,6 +3,7 @@ package com.onsemi.cim.apps.exensio.xfcsreloader.config;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -16,8 +17,13 @@ import javax.sql.DataSource;
  *
  * This DataSource is intentionally separate from the primary Spring DataSource
  * so that Snowflake availability does not affect the main application startup.
+ *
+ * NOTE: This bean is NOT the primary datasource and should NOT be used by
+ * Liquibase, Hibernate, or other ORM/migration tools. It is used only for
+ * ad-hoc JDBC queries in the pre-check feature.
  */
 @Configuration
+@ConditionalOnProperty(name = "snowflake.url", matchIfMissing = false)
 public class SnowflakeDataSourceConfig {
 
     private static final Logger log = LoggerFactory.getLogger(SnowflakeDataSourceConfig.class);
@@ -59,3 +65,4 @@ public class SnowflakeDataSourceConfig {
         return ds;
     }
 }
+
