@@ -21,6 +21,8 @@ import javax.sql.DataSource;
  * NOTE: This bean is NOT the primary datasource and should NOT be used by
  * Liquibase, Hibernate, or other ORM/migration tools. It is used only for
  * ad-hoc JDBC queries in the pre-check feature.
+ *
+ * The bean is only created when snowflake.url environment variable is explicitly set.
  */
 @Configuration
 @ConditionalOnProperty(name = "snowflake.url", matchIfMissing = false)
@@ -57,6 +59,7 @@ public class SnowflakeDataSourceConfig {
             log.warn("snowflake.url is not configured — Snowflake pre-check will fall back to Exensio HTTP");
         }
 
+        log.info("Creating secondary Snowflake datasource for pre-check queries (read-only)");
         DriverManagerDataSource ds = new DriverManagerDataSource();
         ds.setDriverClassName(driverClassName);
         ds.setUrl(url);
