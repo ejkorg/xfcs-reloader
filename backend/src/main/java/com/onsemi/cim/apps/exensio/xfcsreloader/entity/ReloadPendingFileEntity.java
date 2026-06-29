@@ -77,11 +77,24 @@ public class ReloadPendingFileEntity {
     @Column(name = "exensio_pg_key")
     private Long exensioPgKey;
 
+    @Column(name = "archive_year")
+    private Integer archiveYear;
+
+    @Column(name = "archive_month")
+    private Integer archiveMonth;
+
     public String getAbsPath() { return absPath; }
     public void setAbsPath(String absPath) { this.absPath = absPath; }
 
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public Integer getArchiveYear() { return archiveYear; }
+    public void setArchiveYear(Integer archiveYear) { this.archiveYear = archiveYear; }
+
+    public Integer getArchiveMonth() { return archiveMonth; }
+    public void setArchiveMonth(Integer archiveMonth) { this.archiveMonth = archiveMonth; }
+
 
     public String getRequester() { return requester; }
     public void setRequester(String requester) { this.requester = requester; }

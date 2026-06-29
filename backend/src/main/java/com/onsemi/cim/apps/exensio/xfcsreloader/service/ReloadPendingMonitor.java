@@ -390,7 +390,7 @@ public class ReloadPendingMonitor {
                         pf.setResolvedAt(java.time.Instant.now());
                         pendingFileRepository.save(pf);
 
-                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_NOT_PROCESSED");
+                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_NOT_PROCESSED", pf.getArchiveYear(), pf.getArchiveMonth());
                         log.warn("[PendingMonitor] ETL rejected file: {}", pf.getFileName());
 
                         toRemove.add(pf.getAbsPath());
@@ -406,7 +406,7 @@ public class ReloadPendingMonitor {
                         pf.setResolvedAt(java.time.Instant.now());
                         pendingFileRepository.save(pf);
 
-                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_REWORK_FILES");
+                        appendEvent(pf.getSessionId(), "file_failed", msg, pf.getRequester(), "ETL_REWORK_FILES", pf.getArchiveYear(), pf.getArchiveMonth());
                         log.warn("[PendingMonitor] ETL moved file to ReworkFiles: {}", pf.getFileName());
 
                         toRemove.add(pf.getAbsPath());
@@ -509,7 +509,7 @@ public class ReloadPendingMonitor {
                             String dest = pf.getDestinationFolder() != null ? " [" + pf.getDestinationFolder() + "]" : "";
                             String msg = "Loaded in Exensio" + dest + ": " + pf.getFileName()
                                     + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey() + ")";
-                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null, pf.getArchiveYear(), pf.getArchiveMonth());
                             log.info("[PendingMonitor] Exensio confirmed: {}", pf.getFileName());
                             terminal = true;
                         }
@@ -527,7 +527,7 @@ public class ReloadPendingMonitor {
                                         + " (Lot: " + pf.getUserLotId() + ")"
                                         + " | Destination: " + (pf.getDestinationFolder() != null ? pf.getDestinationFolder() : "unknown")
                                         + " | Please verify in Exensio manually.";
-                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND");
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND", pf.getArchiveYear(), pf.getArchiveMonth());
                                 log.warn("[PendingMonitor] Exensio timeout for: {} — marking unverified", pf.getFileName());
                                 terminal = true;
                             }
@@ -547,7 +547,7 @@ public class ReloadPendingMonitor {
                                         + " | Destination: " + (pf.getDestinationFolder() != null ? pf.getDestinationFolder() : "unknown")
                                         + " | API error: " + update.errorMessage()
                                         + " | Please verify in Exensio manually.";
-                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR");
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR", pf.getArchiveYear(), pf.getArchiveMonth());
                                 log.warn("[PendingMonitor] Exensio API error for: {} — marking unverified", pf.getFileName());
                                 terminal = true;
                             }
@@ -631,7 +631,7 @@ public class ReloadPendingMonitor {
                                     ? " [" + pf.getDestinationFolder() + "]" : "";
                             String msg = "Loaded in Exensio" + dest + ": " + pf.getFileName()
                                     + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey() + ")";
-                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null);
+                            appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null, pf.getArchiveYear(), pf.getArchiveMonth());
                             log.info("[PendingMonitor] Exensio confirmed (session={}): {}", sessionId, pf.getFileName());
                             terminal = true;
                         }
@@ -648,7 +648,7 @@ public class ReloadPendingMonitor {
                                         + " | Destination: " + (pf.getDestinationFolder() != null
                                                 ? pf.getDestinationFolder() : "unknown")
                                         + " | Please verify in Exensio manually.";
-                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND");
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_NOT_FOUND", pf.getArchiveYear(), pf.getArchiveMonth());
                                 log.warn("[PendingMonitor] Exensio timeout (session={}): {} — marking unverified",
                                         sessionId, pf.getFileName());
                                 terminal = true;
@@ -667,7 +667,7 @@ public class ReloadPendingMonitor {
                                                 ? pf.getDestinationFolder() : "unknown")
                                         + " | API error: " + update.errorMessage()
                                         + " | Please verify in Exensio manually.";
-                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR");
+                                appendEvent(pf.getSessionId(), "file_unverified", msg, pf.getRequester(), "EXENSIO_API_ERROR", pf.getArchiveYear(), pf.getArchiveMonth());
                                 log.warn("[PendingMonitor] Exensio API error (session={}): {} — marking unverified",
                                         sessionId, pf.getFileName());
                                 terminal = true;
@@ -984,6 +984,10 @@ public class ReloadPendingMonitor {
     // ──────────────────────────────────────────────────────────────────────────
 
     private void appendEvent(String sessionId, String type, String message, String actor, String errorCode) {
+        appendEvent(sessionId, type, message, actor, errorCode, null, null);
+    }
+
+    private void appendEvent(String sessionId, String type, String message, String actor, String errorCode, Integer archiveYear, Integer archiveMonth) {
         try {
             ReloadSessionEventEntity entity = new ReloadSessionEventEntity();
             entity.setSessionId(sessionId);
@@ -992,6 +996,8 @@ public class ReloadPendingMonitor {
             entity.setMessage(message);
             entity.setActor(actor);
             entity.setErrorCode(errorCode);
+            entity.setArchiveYear(archiveYear);
+            entity.setArchiveMonth(archiveMonth);
             ReloadSessionEventEntity saved = eventRepository.save(entity);
 
             // Push to SSE subscribers

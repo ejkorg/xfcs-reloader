@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <changeSet id="7.2-add-archive-date" author="antigravity">
+        <comment>Add archive_year and archive_month to pending files and session events to track historical file coverage by original archive date</comment>
+        <addColumn tableName="xfcs_dearchiver_reload_pending_files">
+            <column name="archive_year" type="INT"/>
+            <column name="archive_month" type="INT"/>
+        </addColumn>
+        <addColumn tableName="xfcs_dearchiver_reload_session_events">
+            <column name="archive_year" type="INT"/>
+            <column name="archive_month" type="INT"/>
+        </addColumn>
+    </changeSet>
+
+</databaseChangeLog>

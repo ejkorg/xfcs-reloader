@@ -147,7 +147,9 @@ public class ReloadExecutionService {
 
             try {
                 String pairSuffixOverride = resolvePairedSuffixOverride(sourcePath, ftTmtContext, pairedReloadSuffixByBase);
-                String resultFileName = stageFile(sourcePath, stagingDir, inboxDir, sessionId, actor, environment, userLotId, pairSuffixOverride);
+                Integer archiveYear = extractYear(sourcePath);
+                Integer archiveMonth = extractMonth(sourcePath);
+                String resultFileName = stageFile(sourcePath, stagingDir, inboxDir, sessionId, actor, environment, userLotId, pairSuffixOverride, archiveYear, archiveMonth);
                 if (resultFileName != null) {
                     completed++;
                     appendEvent(sessionId, "FILE_COMPLETED", "Staged to inbox: " + resultFileName, actor, null);
@@ -178,7 +180,7 @@ public class ReloadExecutionService {
 
     private String stageFile(Path source, Path stagingDir, Path inboxDir,
                               String sessionId, String actor, String environment, String userLotId,
-                              String suffixOverride) throws IOException {
+                              String suffixOverride, Integer archiveYear, Integer archiveMonth) throws IOException {
         String originalName = source.getFileName().toString();
 
         // 1. Copy source → staging
@@ -217,7 +219,7 @@ public class ReloadExecutionService {
         appendEvent(sessionId, "file_copied_to_env", "Placed in inbox: " + finalTarget, actor, null);
 
         // 5. Register as pending for ETL completion monitor
-        registerPending(finalTarget, inboxDir, sessionId, actor, environment, transformedName, originalName, userLotId);
+        registerPending(finalTarget, inboxDir, sessionId, actor, environment, transformedName, originalName, userLotId, archiveYear, archiveMonth);
 
         return transformedName;
     }
@@ -326,7 +328,8 @@ public class ReloadExecutionService {
      */
     @Transactional
     public void registerPending(Path absPath, Path inboxRoot, String sessionId, String actor,
-                                 String environment, String fileName, String originalFileName, String userLotId) {
+                                 String environment, String fileName, String originalFileName, String userLotId,
+                                 Integer archiveYear, Integer archiveMonth) {
         try {
             ReloadPendingFileEntity pending = new ReloadPendingFileEntity();
             pending.setAbsPath(absPath.toString());
@@ -338,15 +341,54 @@ public class ReloadExecutionService {
             pending.setInboxRoot(inboxRoot.toString());
             pending.setCreatedAt(Instant.now());
             pending.setUserLotId(userLotId);
+            pending.setArchiveYear(archiveYear);
+            pending.setArchiveMonth(archiveMonth);
             // file_status defaults to 'pending' via entity field initializer
             pendingFileRepository.saveAndFlush(pending);
-            log.info("[Reload] Registered pending file: sessionId={} env={} file={} absPath={}",
-                    sessionId, environment, fileName, absPath);
+            log.info("[Reload] Registered pending file: sessionId={} env={} file={} absPath={} archiveYear={} archiveMonth={}",
+                    sessionId, environment, fileName, absPath, archiveYear, archiveMonth);
         } catch (Exception e) {
             log.warn("[Reload] Failed to register pending file {} (sessionId={}, env={}): {}",
                     absPath, sessionId, environment, e.getMessage(), e);
         }
     }
+
+    private static Integer extractYear(Path path) {
+        if (path == null) return null;
+        for (Path part : path) {
+            String v = part.toString();
+            if (v.matches("20\\d{2}")) {
+                return Integer.parseInt(v);
+            }
+        }
+        return null;
+    }
+
+    private static Integer extractMonth(Path path) {
+        if (path == null) return null;
+        for (Path part : path) {
+            String v = part.toString().toLowerCase(Locale.ROOT);
+            if (v.matches("0?[1-9]|1[0-2]")) {
+                return Integer.parseInt(v);
+            }
+            switch (v) {
+                case "jan": case "january": return 1;
+                case "feb": case "february": return 2;
+                case "mar": case "march": return 3;
+                case "apr": case "april": return 4;
+                case "may": return 5;
+                case "jun": case "june": return 6;
+                case "jul": case "july": return 7;
+                case "aug": case "august": return 8;
+                case "sep": case "september": return 9;
+                case "oct": case "october": return 10;
+                case "nov": case "november": return 11;
+                case "dec": case "december": return 12;
+            }
+        }
+        return null;
+    }
+
 
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers

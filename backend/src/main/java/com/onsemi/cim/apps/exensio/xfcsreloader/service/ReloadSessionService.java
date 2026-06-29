@@ -890,16 +890,26 @@ public class ReloadSessionService {
         //         guards against the DB session timezone shifting bucket boundaries.
         // H2:     stored as epoch millis, FORMATDATETIME interprets in JVM timezone;
         //         with hibernate.jdbc.time_zone=UTC and JVM in UTC this is consistent.
+        String pfDateExpr = isOracle
+                ? "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
+                  "      THEN TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD')\n" +
+                  "      ELSE TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
+                  " END)"
+                : "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
+                  "      THEN PARSEDATETIME(CAST(pf.archive_year AS VARCHAR) || '-' || CAST(pf.archive_month AS VARCHAR) || '-01', 'yyyy-M-d')\n" +
+                  "      ELSE CAST(pf.created_at AS DATE)\n" +
+                  " END)";
+
         String dateTruncExpr = isOracle
                 ? switch (granularity) {
-                    case "week"  -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'IW'), 'YYYY-MM-DD')";
-                    case "month" -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'MM'), 'YYYY-MM-DD')";
-                    default      -> "TO_CHAR(TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC', 'DD'), 'YYYY-MM-DD')";
+                    case "week"  -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'IW'), 'YYYY-MM-DD')";
+                    case "month" -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'MM'), 'YYYY-MM-DD')";
+                    default      -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'DD'), 'YYYY-MM-DD')";
                   }
                 : switch (granularity) {
-                    case "week"  -> "FORMATDATETIME(pf.created_at, 'YYYY-ww')";
-                    case "month" -> "FORMATDATETIME(pf.created_at, 'yyyy-MM') || '-01'";
-                    default      -> "FORMATDATETIME(pf.created_at, 'yyyy-MM-dd')";
+                    case "week"  -> "FORMATDATETIME(" + pfDateExpr + ", 'YYYY-ww')";
+                    case "month" -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM') || '-01'";
+                    default      -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM-dd')";
                   };
 
         StringBuilder sql = new StringBuilder(
@@ -910,7 +920,21 @@ public class ReloadSessionService {
                 "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading','etl_complete')   THEN 1 ELSE 0 END) AS enqueued,\n" +
                 "       SUM(CASE WHEN pf.file_status = 'pending'                                THEN 1 ELSE 0 END) AS staged,\n" +
                 "       SUM(CASE WHEN pf.file_status = 'failed'                                 THEN 1 ELSE 0 END) AS failed\n" +
-                "FROM xfcs_dearchiver_reload_pending_files pf\n" +
+                "FROM (\n" +
+                "  SELECT created_at, environment, file_status, archive_year, archive_month\n" +
+                "  FROM xfcs_dearchiver_reload_pending_files\n" +
+                "  UNION ALL\n" +
+                "  SELECT s.created_at, s.environment,\n" +
+                "         (CASE WHEN ev.event_type = 'file_completed' THEN 'completed'\n" +
+                "               WHEN ev.event_type = 'file_failed'    THEN 'failed'\n" +
+                "               WHEN ev.event_type = 'file_unverified' THEN 'failed'\n" +
+                "               ELSE 'pending' END) AS file_status,\n" +
+                "         ev.archive_year,\n" +
+                "         ev.archive_month\n" +
+                "  FROM xfcs_dearchiver_reload_session_events ev\n" +
+                "  JOIN xfcs_dearchiver_reload_sessions s ON s.session_id = ev.session_id\n" +
+                "  WHERE ev.event_type IN ('file_completed', 'file_failed', 'file_unverified')\n" +
+                ") pf\n" +
                 "WHERE 1=1\n");
 
         // Use named parameters to avoid positional index issues and Oracle JDBC type binding.
@@ -919,10 +943,10 @@ public class ReloadSessionService {
             sql.append("  AND pf.environment = :env\n");
         }
         if (dateFrom != null && !dateFrom.isBlank()) {
-            sql.append("  AND pf.created_at >= :dateFrom\n");
+            sql.append("  AND ").append(pfDateExpr).append(" >= :dateFrom\n");
         }
         if (dateTo != null && !dateTo.isBlank()) {
-            sql.append("  AND pf.created_at < :dateTo\n");
+            sql.append("  AND ").append(pfDateExpr).append(" < :dateTo\n");
         }
 
         sql.append("GROUP BY ").append(dateTruncExpr).append(", pf.environment\n")

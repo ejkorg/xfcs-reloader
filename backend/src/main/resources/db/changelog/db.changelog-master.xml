@@ -16,5 +16,6 @@
     <include file="db/changelog/db.changelog-5.8-pending-files-destination.xml"/>
     <include file="db/changelog/db.changelog-5.9-pending-files-exensio.xml"/>
     <include file="db/changelog/db.changelog-7.1-rename-exensio-loading.xml"/>
+    <include file="db/changelog/db.changelog-7.2-add-archive-date.xml"/>
 
 </databaseChangeLog>

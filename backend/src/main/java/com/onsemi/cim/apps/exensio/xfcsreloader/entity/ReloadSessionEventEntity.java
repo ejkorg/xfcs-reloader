@@ -34,6 +34,12 @@ public class ReloadSessionEventEntity {
     @Column(name = "error_code", length = 64)
     private String errorCode;
 
+    @Column(name = "archive_year")
+    private Integer archiveYear;
+
+    @Column(name = "archive_month")
+    private Integer archiveMonth;
+
     public Long getId() {
         return id;
     }
@@ -41,6 +47,13 @@ public class ReloadSessionEventEntity {
     public void setId(Long id) {
         this.id = id;
     }
+
+    public Integer getArchiveYear() { return archiveYear; }
+    public void setArchiveYear(Integer archiveYear) { this.archiveYear = archiveYear; }
+
+    public Integer getArchiveMonth() { return archiveMonth; }
+    public void setArchiveMonth(Integer archiveMonth) { this.archiveMonth = archiveMonth; }
+
 
     public String getSessionId() {
         return sessionId;
