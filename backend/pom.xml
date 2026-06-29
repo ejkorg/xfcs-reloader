@@ -108,11 +108,6 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.onsemi.cim.apps.exensio.xfcsreloader.XfcsReloaderApplication</mainClass>
-                    <!-- Use PropertiesLauncher so -Dloader.path works at runtime -->
-                    <layout>ZIP</layout>
-                </configuration>
             </plugin>
         </plugins>
     </build>
