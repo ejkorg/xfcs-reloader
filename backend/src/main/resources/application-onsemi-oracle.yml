@@ -4,8 +4,6 @@ spring:
     username: refdb
     password: "br#^gox66312sdAB"
     driver-class-name: oracle.jdbc.OracleDriver
-    hikari:
-      jdbc-url: jdbc:oracle:thin:@//exnqa-db.onsemi.com:1740/EXNQA.onsemi.com
   jpa:
     database-platform: org.hibernate.dialect.OracleDialect
     hibernate:
