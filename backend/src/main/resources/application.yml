@@ -16,7 +16,7 @@ spring:
       hibernate:
         format_sql: false
   liquibase:
-    enabled: ${LIQUIBASE_ENABLED:false}
+    enabled: false
   mail:
     host: ${SPRING_MAIL_HOST:}
     port: ${SPRING_MAIL_PORT:25}
