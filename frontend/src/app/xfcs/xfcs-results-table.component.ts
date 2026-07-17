@@ -33,17 +33,18 @@ import { SearchResult } from '../api/xfcs-models';
         <div class="search-box">
           <app-glass-icon name="filter_list" [size]="16" color="muted"></app-glass-icon>
           <input type="text" 
-                 [(ngModel)]="searchText" 
+                 [ngModel]="searchText()" 
+                 (ngModelChange)="searchText.set($event); page.set(1)" 
                  placeholder="Filter by Filename or Lot ID..." 
                  class="filter-input">
         </div>
         <div class="type-filters">
           <button class="filter-pill" 
                   [class.active]="activeType() === 'all'" 
-                  (click)="activeType.set('all')">ALL</button>
+                  (click)="activeType.set('all'); page.set(1)">ALL</button>
           <button *ngFor="let t of availableTypes()" class="filter-pill"
                   [class.active]="activeType() === t"
-                  (click)="activeType.set(t)">
+                  (click)="activeType.set(t); page.set(1)">
             {{ t }}
           </button>
         </div>
@@ -61,7 +62,7 @@ import { SearchResult } from '../api/xfcs-models';
             </tr>
           </thead>
           <tbody>
-            <tr *ngFor="let r of filteredResults(); let i = index" 
+            <tr *ngFor="let r of paginatedResults(); let i = index" 
                 [class.alt-row]="i % 2 === 1"
                 [class.selected-row]="isSelected(r)"
                 (click)="toggleSelection(r)">
@@ -83,13 +84,27 @@ import { SearchResult } from '../api/xfcs-models';
               </td>
             </tr>
  
-            <tr *ngIf="filteredResults().length === 0">
+            <tr *ngIf="paginatedResults().length === 0">
               <td colspan="5" class="empty-results">
                 No files match your current filters.
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Pagination Controls -->
+      <div class="xfcs-pagination" *ngIf="totalPages() > 1">
+        <span class="xfcs-page-info">
+          Page {{ page() }} of {{ totalPages() }} · {{ filteredResults().length }} files
+        </span>
+        <div class="xfcs-page-controls">
+          <button class="xfcs-page-btn" [disabled]="page() === 1" (click)="page.set(page() - 1)">‹ Prev</button>
+          <ng-container *ngFor="let p of pageNumbers()">
+            <button class="xfcs-page-btn xfcs-page-num-btn" [class.active]="p === page()" (click)="page.set(p)">{{ p }}</button>
+          </ng-container>
+          <button class="xfcs-page-btn" [disabled]="page() === totalPages()" (click)="page.set(page() + 1)">Next ›</button>
+        </div>
       </div>
     </section>
   `,
@@ -270,6 +285,9 @@ export class XfcsResultsTableComponent {
     if (currentType !== 'all' && !this.getAvailableTypesInternal().includes(currentType)) {
       this.activeType.set('all');
     }
+
+    // Reset pagination to first page
+    this.page.set(1);
   }
   get results() { return this._results(); }
 
@@ -287,6 +305,28 @@ export class XfcsResultsTableComponent {
   private externalSelectionBound = false;
   searchText = signal<string>('');
   activeType = signal<string>('all');
+ 
+  page = signal(1);
+  pageSize = signal(25);
+
+  paginatedResults = computed(() => {
+    const list = this.filteredResults();
+    const start = (this.page() - 1) * this.pageSize();
+    return list.slice(start, start + this.pageSize());
+  });
+
+  totalPages = computed(() => Math.max(1, Math.ceil(this.filteredResults().length / this.pageSize())));
+
+  pageNumbers = computed(() => {
+    const total = this.totalPages();
+    const cur = this.page();
+    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+    const pages: number[] = [];
+    for (let p = Math.max(1, cur - 2); p <= Math.min(total, cur + 2); p++) pages.push(p);
+    if (pages[0] > 1) pages.unshift(1);
+    if (pages[pages.length - 1] < total) pages.push(total);
+    return pages;
+  });
  
   filteredResults = computed(() => {
     const raw = this._results();
