@@ -1,5 +1,6 @@
 import {
   AfterViewInit,
+  ApplicationRef,
   Component,
   OnDestroy,
   OnInit,
@@ -580,6 +581,7 @@ export class XfcsSessionsComponent implements OnInit, AfterViewInit, OnDestroy {
     private api: XfcsApiService,
     private toast: ToastService,
     private vcr: ViewContainerRef,
+    private appRef: ApplicationRef,
   ) {
     // Re-render charts whenever filteredFiles changes (while modal is open)
     effect(() => {
