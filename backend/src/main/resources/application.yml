@@ -130,3 +130,16 @@ management:
   endpoint:
     health:
       show-details: always
+
+refdb:
+  pplog:
+    host: ${XFCS_PPLOG_HOST:}
+    port: ${XFCS_PPLOG_PORT:1729}
+    service: ${XFCS_PPLOG_SERVICE:}
+    user: ${XFCS_PPLOG_USER:}
+    password: ${XFCS_PPLOG_PASSWORD:}
+    pool:
+      max-size: ${XFCS_PPLOG_POOL_MAX:3}
+      min-idle: ${XFCS_PPLOG_POOL_MIN_IDLE:1}
+    min-idle: ${XFCS_PPLOG_MIN_IDLE:2}
+

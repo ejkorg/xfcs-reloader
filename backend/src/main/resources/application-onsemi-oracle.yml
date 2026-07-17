@@ -55,3 +55,16 @@ xfcs:
   # Optional: email subject prefix and row cap
   notification-email-subject-prefix: ${XFCS_NOTIFICATION_EMAIL_SUBJECT_PREFIX:[XFCS Reloader]}
   notification-email-max-files: ${XFCS_NOTIFICATION_EMAIL_MAX_FILES:500}
+
+refdb:
+  pplog:
+    host: "exnprd-db.onsemi.com"
+    port: 1729
+    service: "EXNPRD.onsemi.com"
+    user: refdb
+    password: "88sgX%#$29-azx"
+    pool:
+      max-size: 3
+      min-idle: 1
+    min-idle: 2
+

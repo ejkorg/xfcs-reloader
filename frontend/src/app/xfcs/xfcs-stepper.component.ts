@@ -356,27 +356,93 @@ export interface SearchRow {
             <p>Verify your environment and file selections before dispatching the reload session.</p>
           </div>
 
-          <div class="review-summary">
-            <div class="summary-item">
-              <span class="label">Environment</span>
-              <span class="value accent mono">{{ environment() }}</span>
-            </div>
-            <div class="summary-item">
-              <span class="label">Total Files Selected</span>
-              <span class="value">{{ selectedFiles().length }}</span>
-            </div>
-            <div class="summary-item">
-              <span class="label">Estimated Data Size</span>
-              <span class="value mono">{{ totalSelectedSize() | number }} bytes</span>
-            </div>
-            <hr class="divider">
-            <div class="file-preview-list">
-              <div class="preview-file" *ngFor="let f of selectedFiles() | slice:0:10">
-                <app-glass-icon name="description" [size]="14" color="muted"></app-glass-icon>
-                <span class="file-name">{{ f.filename }}</span>
+          <div class="review-layout">
+            <!-- Left Panel: Session Metadata -->
+            <div class="review-sidebar">
+              <div class="glass-card review-meta-card">
+                <div class="card-header">
+                  <app-glass-icon name="settings" [size]="18" class="accent-icon"></app-glass-icon>
+                  <h4>Target Configuration</h4>
+                </div>
+                
+                <div class="meta-rows">
+                  <div class="meta-row">
+                    <span class="meta-label">Environment</span>
+                    <span class="meta-value env-pill">{{ environment() }}</span>
+                  </div>
+                  
+                  <div class="meta-row" *ngIf="selectedEnvInfo()?.siteName">
+                    <span class="meta-label">Site / Area</span>
+                    <span class="meta-value">{{ selectedEnvInfo()?.siteName }} / {{ selectedEnvInfo()?.areaCode || 'N/A' }}</span>
+                  </div>
+
+                  <div class="meta-row" *ngIf="selectedEnvInfo()?.testerType">
+                    <span class="meta-label">Tester Type</span>
+                    <span class="meta-value">{{ selectedEnvInfo()?.testerType }}</span>
+                  </div>
+
+                  <div class="meta-row">
+                    <span class="meta-label">Total Files</span>
+                    <span class="meta-value highlight">{{ selectedFiles().length }} files</span>
+                  </div>
+
+                  <div class="meta-row">
+                    <span class="meta-label">Total Size</span>
+                    <span class="meta-value highlight">{{ formatBytes(totalSelectedSize()) }}</span>
+                  </div>
+                </div>
+
+                <div class="precheck-status-box" *ngIf="preCheckResult()">
+                  <div class="status-indicator success" *ngIf="preCheckResult()?.lotsNotFound?.length === 0">
+                    <app-glass-icon name="check_circle" [size]="16"></app-glass-icon>
+                    <span>All lots pre-validated in Exensio.</span>
+                  </div>
+                  <div class="status-indicator warning" *ngIf="(preCheckResult()?.lotsNotFound?.length ?? 0) > 0">
+                    <app-glass-icon name="warning" [size]="16"></app-glass-icon>
+                    <span>{{ preCheckResult()?.lotsNotFound?.length }} lots not found in Exensio.</span>
+                  </div>
+                </div>
               </div>
-              <div class="preview-more" *ngIf="selectedFiles().length > 10">
-                And {{ selectedFiles().length - 10 }} more files...
+
+              <!-- Safety info notice -->
+              <div class="safety-notice">
+                <app-glass-icon name="info" [size]="18"></app-glass-icon>
+                <div class="notice-text">
+                  <h5>Reload Ingestion</h5>
+                  <p>Archival data will be extracted from storage and dispatched to the ingestion pipeline. Processing time depends on size and system load.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Panel: Selected Files Details -->
+            <div class="review-main">
+              <div class="glass-card file-list-card">
+                <div class="card-header">
+                  <app-glass-icon name="folder_open" [size]="18" class="accent-icon"></app-glass-icon>
+                  <h4>Files to Reload ({{ selectedFiles().length }})</h4>
+                </div>
+
+                <div class="file-preview-list">
+                  <div class="preview-file-item" *ngFor="let f of selectedFiles() | slice:0:15">
+                    <div class="file-info-group">
+                      <app-glass-icon name="description" [size]="18" class="file-icon"></app-glass-icon>
+                      <div class="file-details">
+                        <span class="file-name" [title]="f.filename">{{ f.filename }}</span>
+                        <div class="file-tags">
+                          <span class="file-tag lot-tag" *ngIf="f.lotId">Lot: {{ f.lotId }}</span>
+                          <span class="file-tag path-tag" *ngIf="f.year || f.month">
+                            {{ f.year }}/{{ f.month ? (f.month | number:'2.0-0') : '' }}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <span class="file-size-badge">{{ formatBytes(f.sizeBytes || 0) }}</span>
+                  </div>
+
+                  <div class="preview-more-banner" *ngIf="selectedFiles().length > 15">
+                    <span>And {{ selectedFiles().length - 15 }} more files will be included in the session...</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -928,6 +994,297 @@ export interface SearchRow {
     .animate-in { animation: fadeInUp 0.4s ease-out; }
     @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
+    /* STEP 3: REVIEW & CONFIRM PANEL */
+    .review-layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (max-width: 960px) {
+      .review-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .glass-card {
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(30, 24, 64, 0.4);
+      padding: 1.5rem;
+      box-shadow: 0 8px 32px rgba(15, 12, 41, 0.25);
+    }
+    body.light-theme .glass-card {
+      border-color: rgba(99, 102, 241, 0.15);
+      background: rgba(255, 255, 255, 0.6);
+      box-shadow: 0 8px 32px rgba(99, 102, 241, 0.05);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.75rem;
+    }
+    body.light-theme .card-header {
+      border-bottom-color: rgba(99, 102, 241, 0.1);
+    }
+    .card-header h4 {
+      margin: 0;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    body.light-theme .card-header h4 {
+      color: var(--text-main);
+    }
+    .accent-icon {
+      color: var(--accent-color);
+    }
+
+    .meta-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+    }
+    .meta-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .meta-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    body.light-theme .meta-value {
+      color: var(--text-main);
+    }
+    .meta-value.highlight {
+      color: var(--accent-color);
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .meta-value.env-pill {
+      background: rgba(129, 140, 248, 0.15);
+      border: 1px solid rgba(129, 140, 248, 0.3);
+      padding: 0.25rem 0.6rem;
+      border-radius: 6px;
+      color: var(--accent-color);
+      font-family: monospace;
+    }
+
+    .precheck-status-box {
+      margin-top: 1.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    body.light-theme .precheck-status-box {
+      border-top-color: rgba(99, 102, 241, 0.1);
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .status-indicator.success {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      color: #10b981;
+    }
+    .status-indicator.warning {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+    }
+
+    .safety-notice {
+      display: flex;
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      border: 1px solid rgba(167, 139, 250, 0.15);
+      background: rgba(167, 139, 250, 0.05);
+      color: var(--text-muted);
+      margin-top: 1rem;
+      align-items: flex-start;
+    }
+    .safety-notice .material-icons {
+      color: var(--accent-color);
+      margin-top: 2px;
+    }
+    .notice-text h5 {
+      margin: 0 0 0.25rem 0;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    body.light-theme .notice-text h5 {
+      color: var(--text-main);
+    }
+    .notice-text p {
+      margin: 0;
+      font-size: 0.75rem;
+      line-height: 1.4;
+    }
+
+    /* RIGHT FILE LIST CARD */
+    .file-list-card {
+      max-height: 480px;
+      display: flex;
+      flex-direction: column;
+    }
+    .file-preview-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      overflow-y: auto;
+      padding-right: 0.5rem;
+      max-height: 380px;
+    }
+    /* Custom Scrollbar for list */
+    .file-preview-list::-webkit-scrollbar {
+      width: 6px;
+    }
+    .file-preview-list::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 3px;
+    }
+    .file-preview-list::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 3px;
+    }
+    .file-preview-list::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+    body.light-theme .file-preview-list::-webkit-scrollbar-thumb {
+      background: rgba(99, 102, 241, 0.2);
+    }
+
+    .preview-file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.6rem 0.8rem;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      background: rgba(255, 255, 255, 0.01);
+      transition: all 0.2s ease;
+      gap: 1.5rem;
+    }
+    .preview-file-item:hover {
+      border-color: rgba(129, 140, 248, 0.2);
+      background: rgba(129, 140, 248, 0.03);
+    }
+    body.light-theme .preview-file-item {
+      border-color: rgba(99, 102, 241, 0.05);
+      background: rgba(99, 102, 241, 0.02);
+    }
+    body.light-theme .preview-file-item:hover {
+      border-color: rgba(99, 102, 241, 0.15);
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    .file-info-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      min-width: 0;
+      flex: 1;
+    }
+    .file-icon {
+      color: var(--accent-color);
+      opacity: 0.8;
+      flex-shrink: 0;
+    }
+    .file-details {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .file-name {
+      font-size: 0.825rem;
+      font-weight: 500;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: monospace;
+    }
+    body.light-theme .file-name {
+      color: var(--text-main);
+    }
+    .file-tags {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .file-tag {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .lot-tag {
+      background: rgba(129, 140, 248, 0.15);
+      color: var(--accent-color);
+      border: 1px solid rgba(129, 140, 248, 0.2);
+    }
+    .path-tag {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-muted);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    body.light-theme .path-tag {
+      background: rgba(15, 23, 42, 0.05);
+      color: var(--text-muted);
+      border-color: rgba(15, 23, 42, 0.05);
+    }
+
+    .file-size-badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      white-space: nowrap;
+      font-family: monospace;
+    }
+
+    .preview-more-banner {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.75rem;
+      border-radius: 8px;
+      background: rgba(129, 140, 248, 0.05);
+      border: 1px dashed rgba(129, 140, 248, 0.2);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent-color);
+      text-align: center;
+    }
+
     @media (max-width: 768px) {
       .stepper-header { flex-direction: column; align-items: flex-start; }
       .stepper-progress { width: 100%; justify-content: space-between; }
@@ -935,6 +1292,16 @@ export interface SearchRow {
   `]
 })
 export class XfcsStepperComponent implements OnInit {
+  // Helper for human-readable file sizes
+  formatBytes(bytes: number, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  }
+
   currentStep = signal<number>(1);
   environment = signal<string>('');
   searchRows = signal<SearchRow[]>([{ id: 1, lotsRaw: '', lots: [], rejectedLots: [] }]);

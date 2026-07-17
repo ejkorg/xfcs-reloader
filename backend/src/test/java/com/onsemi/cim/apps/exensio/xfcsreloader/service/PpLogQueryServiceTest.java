@@ -65,38 +65,28 @@ class PpLogQueryServiceTest {
     // ────────────────────────────────────────────────────────────────────────────
 
     @Test
-    void extractSandboxReason_withSampleFromSpec_returnsFirstBadSegment() {
+    void extractSandboxReason_withSampleFromSpec_returnsFirstSegment() {
         // Sample from spec: "PartNo Not Specified..sending file to sandbox --- Good. Meta Found ... --- Test name should not be blank. ---  at ... line 950."
         String logMessage = "PartNo Not Specified..sending file to sandbox --- Good. Meta Found ... --- Test name should not be blank. ---  at ... line 950.";
         String reason = PpLogQueryService.extractSandboxReason(logMessage);
         
-        // Should return the first segment containing "Not Specified" (which contains "Not found" would match)
-        assertThat(reason).isNotNull();
-        assertThat(reason.toLowerCase()).contains("not");
+        assertThat(reason).isEqualTo("PartNo Not Specified..sending file to sandbox");
     }
 
     @Test
-    void extractSandboxReason_withBadKeyword_returnsSegmentContainingBad() {
-        String logMessage = "Good segment --- Bad segment with error --- Another segment";
+    void extractSandboxReason_withMultipleSegments_returnsFirst() {
+        String logMessage = "Some data segment --- Bad segment with error --- Another segment";
         String reason = PpLogQueryService.extractSandboxReason(logMessage);
         
-        assertThat(reason).isEqualTo("Bad segment with error");
+        assertThat(reason).isEqualTo("Some data segment");
     }
 
     @Test
-    void extractSandboxReason_withNotFoundKeyword_returnsSegment() {
-        String logMessage = "Some data --- Good data --- Not found in database --- More data";
+    void extractSandboxReason_withLeadingEmptySegment_returnsFirstNonEmpty() {
+        String logMessage = " --- Second segment --- Third segment";
         String reason = PpLogQueryService.extractSandboxReason(logMessage);
         
-        assertThat(reason).isEqualTo("Not found in database");
-    }
-
-    @Test
-    void extractSandboxReason_withNoQualifyingSegment_returnsNull() {
-        String logMessage = "All good segments --- Everything fine --- No issues";
-        String reason = PpLogQueryService.extractSandboxReason(logMessage);
-        
-        assertThat(reason).isNull();
+        assertThat(reason).isEqualTo("Second segment");
     }
 
     @Test

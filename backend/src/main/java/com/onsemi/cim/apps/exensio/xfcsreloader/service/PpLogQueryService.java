@@ -1,12 +1,18 @@
 package com.onsemi.cim.apps.exensio.xfcsreloader.service;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
+import com.onsemi.cim.apps.exensio.xfcsreloader.config.PpLogDbProperties;
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.Locale;
 
 /**
@@ -22,8 +28,53 @@ public class PpLogQueryService {
 
     private static final Logger log = LoggerFactory.getLogger(PpLogQueryService.class);
 
-    @PersistenceContext
-    private EntityManager entityManager;
+    private final DataSource mainDataSource;
+    private final PpLogDbProperties ppLogDbProperties;
+    private HikariDataSource ppLogDataSource;
+
+    public PpLogQueryService(DataSource mainDataSource, PpLogDbProperties ppLogDbProperties) {
+        this.mainDataSource = mainDataSource;
+        this.ppLogDbProperties = ppLogDbProperties;
+    }
+
+    @PostConstruct
+    public void init() {
+        if (ppLogDbProperties != null && ppLogDbProperties.isPpLogAvailable()) {
+            try {
+                HikariConfig ppConfig = new HikariConfig();
+                ppConfig.setJdbcUrl(ppLogDbProperties.buildJdbcUrl());
+                ppConfig.setUsername(ppLogDbProperties.getUser());
+                ppConfig.setPassword(ppLogDbProperties.getPassword());
+                ppConfig.setDriverClassName("oracle.jdbc.OracleDriver");
+                ppConfig.setMaximumPoolSize(ppLogDbProperties.getPool().getMaxSize());
+                ppConfig.setMinimumIdle(ppLogDbProperties.getPool().getMinIdle());
+                ppConfig.setPoolName("xfcs-pplog-prod");
+                this.ppLogDataSource = new HikariDataSource(ppConfig);
+                log.info("[PpLogQueryService] Separate pp_log datasource initialized pointing to PRODUCTION: {}", 
+                         ppLogDbProperties.buildJdbcUrl());
+            } catch (Exception e) {
+                log.error("[PpLogQueryService] Failed to initialize separate production pp_log datasource: {}", e.getMessage(), e);
+            }
+        } else {
+            log.info("[PpLogQueryService] Separate pp_log datasource not configured; using main database connection.");
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        if (ppLogDataSource != null) {
+            try {
+                ppLogDataSource.close();
+                log.info("[PpLogQueryService] Separate pp_log datasource closed.");
+            } catch (Exception e) {
+                log.warn("[PpLogQueryService] Error closing separate pp_log datasource: {}", e.getMessage());
+            }
+        }
+    }
+
+    private DataSource getDataSource() {
+        return ppLogDataSource != null ? ppLogDataSource : mainDataSource;
+    }
 
     /**
      * Result of a pp_log lookup for a single file.
@@ -58,73 +109,69 @@ public class PpLogQueryService {
             return null;
         }
 
-        try {
-            // Split fileName into stem (FILE_NAME) and extension (EXTENSION)
-            String fileNameNoExt = fileName;
-            String extension = null;
+        // Split fileName into stem (FILE_NAME) and extension (EXTENSION)
+        String fileNameNoExt = fileName;
+        String extension = null;
 
-            int lastDotIdx = fileName.lastIndexOf('.');
-            if (lastDotIdx > 0) {
-                fileNameNoExt = fileName.substring(0, lastDotIdx);
-                extension = fileName.substring(lastDotIdx + 1);
-            }
+        int lastDotIdx = fileName.lastIndexOf('.');
+        if (lastDotIdx > 0) {
+            fileNameNoExt = fileName.substring(0, lastDotIdx);
+            extension = fileName.substring(lastDotIdx + 1);
+        }
 
-            // Build and execute the SQL query
-            @SuppressWarnings("unchecked")
-            List<Object[]> results;
+        try (Connection conn = getDataSource().getConnection()) {
+            String sql;
             if (extension != null && !extension.isBlank()) {
-                String sql = "SELECT OUTPUT_DIRECTORY, LOG_MESSAGE FROM refdb.pp_log " +
-                      "WHERE LOT = :lot " +
-                      "AND UPPER(ENVIRONMENT) = UPPER(:environment) " +
-                      "AND FILE_NAME = :fileNameNoExt " +
-                      "AND UPPER(EXTENSION) = UPPER(:extension) " +
+                sql = "SELECT OUTPUT_DIRECTORY, LOG_MESSAGE FROM refdb.pp_log " +
+                      "WHERE LOT = ? " +
+                      "AND UPPER(ENVIRONMENT) = UPPER(?) " +
+                      "AND FILE_NAME = ? " +
+                      "AND UPPER(EXTENSION) = UPPER(?) " +
                       "ORDER BY PROCESS_DATETIME DESC " +
                       "FETCH FIRST 1 ROWS ONLY";
-                results = (List<Object[]>) entityManager.createNativeQuery(sql)
-                        .setParameter("lot", lot)
-                        .setParameter("environment", environment)
-                        .setParameter("fileNameNoExt", fileNameNoExt)
-                        .setParameter("extension", extension)
-                        .getResultList();
             } else {
-                String sql = "SELECT OUTPUT_DIRECTORY, LOG_MESSAGE FROM refdb.pp_log " +
-                      "WHERE LOT = :lot " +
-                      "AND UPPER(ENVIRONMENT) = UPPER(:environment) " +
-                      "AND FILE_NAME = :fileNameNoExt " +
+                sql = "SELECT OUTPUT_DIRECTORY, LOG_MESSAGE FROM refdb.pp_log " +
+                      "WHERE LOT = ? " +
+                      "AND UPPER(ENVIRONMENT) = UPPER(?) " +
+                      "AND FILE_NAME = ? " +
                       "ORDER BY PROCESS_DATETIME DESC " +
                       "FETCH FIRST 1 ROWS ONLY";
-                results = (List<Object[]>) entityManager.createNativeQuery(sql)
-                        .setParameter("lot", lot)
-                        .setParameter("environment", environment)
-                        .setParameter("fileNameNoExt", fileNameNoExt)
-                        .getResultList();
             }
 
-            if (results.isEmpty()) {
-                log.debug("[PpLogQuery] No pp_log record found for lot={}, env={}, fileName={}", lot, environment, fileName);
-                return null;
+            try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, lot);
+                ps.setString(2, environment);
+                ps.setString(3, fileNameNoExt);
+                if (extension != null && !extension.isBlank()) {
+                    ps.setString(4, extension);
+                }
+
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        String outputDirectory = rs.getString("OUTPUT_DIRECTORY");
+                        String logMessage = rs.getString("LOG_MESSAGE");
+
+                        // Derive destination from OUTPUT_DIRECTORY
+                        String destination = deriveDestination(outputDirectory);
+
+                        // Extract reason based on destination
+                        String reason = null;
+                        if ("SANDBOX".equals(destination)) {
+                            reason = extractSandboxReason(logMessage);
+                        } else if ("NOT_PROCESSED".equals(destination)) {
+                            reason = extractErrorReason(logMessage);
+                        }
+
+                        log.debug("[PpLogQuery] Found pp_log record: lot={}, env={}, destination={}, reason={}", 
+                                lot, environment, destination, reason);
+
+                        return new PpLogResult(destination, reason);
+                    } else {
+                        log.debug("[PpLogQuery] No pp_log record found for lot={}, env={}, fileName={}", lot, environment, fileName);
+                        return null;
+                    }
+                }
             }
-
-            Object[] row = results.get(0);
-            String outputDirectory = (String) row[0];
-            String logMessage = (String) row[1];
-
-            // Derive destination from OUTPUT_DIRECTORY
-            String destination = deriveDestination(outputDirectory);
-
-            // Extract reason based on destination
-            String reason = null;
-            if ("SANDBOX".equals(destination)) {
-                reason = extractSandboxReason(logMessage);
-            } else if ("NOT_PROCESSED".equals(destination)) {
-                reason = extractErrorReason(logMessage);
-            }
-
-            log.debug("[PpLogQuery] Found pp_log record: lot={}, env={}, destination={}, reason={}", 
-                    lot, environment, destination, reason);
-
-            return new PpLogResult(destination, reason);
-
         } catch (Exception ex) {
             log.warn("[PpLogQuery] Error querying pp_log for lot={}, env={}, fileName={}: {}", 
                     lot, environment, fileName, ex.getMessage());
@@ -161,8 +208,7 @@ public class PpLogQueryService {
 
     /**
      * Extracts sandbox reason from LOG_MESSAGE.
-     * Splits by " --- ", returns first segment containing "Bad" or "Not found" (case-insensitive).
-     * Returns null if no qualifying segment found.
+     * Splits by " --- ", returns the first non-empty segment.
      *
      * Validates: Requirement 5.2
      * Feature: stepper-pplog-enhancements, Property 7: Sandbox reason extraction from LOG_MESSAGE
@@ -176,14 +222,10 @@ public class PpLogQueryService {
         }
 
         String[] segments = logMessage.split(" --- ");
-
         for (String segment : segments) {
             if (segment == null) continue;
             String trimmed = segment.trim();
-            if (trimmed.isEmpty()) continue;
-
-            String lowerSegment = trimmed.toLowerCase(Locale.ROOT);
-            if (lowerSegment.contains("bad") || lowerSegment.contains("not found")) {
+            if (!trimmed.isEmpty()) {
                 return trimmed;
             }
         }
