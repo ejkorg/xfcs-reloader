@@ -1,6 +1,5 @@
-﻿import {
+import {
   AfterViewInit,
-  ApplicationRef,
   Component,
   OnDestroy,
   OnInit,
@@ -581,7 +580,6 @@ export class XfcsSessionsComponent implements OnInit, AfterViewInit, OnDestroy {
     private api: XfcsApiService,
     private toast: ToastService,
     private vcr: ViewContainerRef,
-    private appRef: ApplicationRef,
   ) {
     // Re-render charts whenever filteredFiles changes (while modal is open)
     effect(() => {
@@ -709,15 +707,12 @@ export class XfcsSessionsComponent implements OnInit, AfterViewInit, OnDestroy {
     document.body.appendChild(hostEl);
     this.modalHostEl = hostEl;
     this.modalPortalRef = this.vcr.createEmbeddedView(this.modalTpl);
-    // Attach to ApplicationRef so it participates in change detection
-    this.appRef.attachView(this.modalPortalRef);
     this.modalPortalRef.rootNodes.forEach((node: Node) => hostEl.appendChild(node));
     this.modalPortalRef.detectChanges();
   }
 
   private closeModalPortal(): void {
     if (this.modalPortalRef) {
-      this.appRef.detachView(this.modalPortalRef);
       this.modalPortalRef.destroy();
       this.modalPortalRef = null;
     }
