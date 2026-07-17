@@ -94,10 +94,24 @@ import { SearchResult } from '../api/xfcs-models';
       </div>
 
       <!-- Pagination Controls -->
-      <div class="xfcs-pagination" *ngIf="totalPages() > 1">
+      <div class="xfcs-pagination">
+        <div class="xfcs-page-size-selector">
+          <span class="xfcs-page-info">Show</span>
+          <select [ngModel]="pageSize()" 
+                  (ngModelChange)="pageSize.set(+$event); page.set(1)" 
+                  class="xfcs-size-select">
+            <option [value]="10">10</option>
+            <option [value]="25">25</option>
+            <option [value]="50">50</option>
+            <option [value]="100">100</option>
+          </select>
+          <span class="xfcs-page-info">entries</span>
+        </div>
+
         <span class="xfcs-page-info">
           Page {{ page() }} of {{ totalPages() }} · {{ filteredResults().length }} files
         </span>
+
         <div class="xfcs-page-controls">
           <button class="xfcs-page-btn" [disabled]="page() === 1" (click)="page.set(page() - 1)">‹ Prev</button>
           <ng-container *ngFor="let p of pageNumbers()">
@@ -257,6 +271,33 @@ import { SearchResult } from '../api/xfcs-models';
     }
  
     .empty-results { padding: 3rem; text-align: center; color: var(--text-muted); font-style: italic; }
+
+    .xfcs-page-size-selector {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .xfcs-size-select {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(167, 139, 250, 0.2);
+      color: var(--text-main);
+      border-radius: 6px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      outline: none;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+    .xfcs-size-select:focus {
+      border-color: rgba(167, 139, 250, 0.5);
+      background: rgba(255, 255, 255, 0.1);
+    }
+    body.light-theme .xfcs-size-select {
+      background: rgba(99, 102, 241, 0.05);
+      border-color: rgba(99, 102, 241, 0.2);
+      color: #0f172a;
+    }
   `]
 })
 export class XfcsResultsTableComponent {
@@ -307,7 +348,7 @@ export class XfcsResultsTableComponent {
   activeType = signal<string>('all');
  
   page = signal(1);
-  pageSize = signal(25);
+  pageSize = signal(10);
 
   paginatedResults = computed(() => {
     const list = this.filteredResults();
