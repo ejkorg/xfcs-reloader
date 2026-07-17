@@ -2,13 +2,14 @@ import { Component, Input, Output, EventEmitter, signal, computed } from '@angul
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { GlassButtonComponent } from '../shared/components/glass-button.component';
+import { GlassSelectComponent } from '../shared/components/glass-select.component';
 import { GlassIconComponent } from '../shared/components/glass-icon.component';
 import { SearchResult } from '../api/xfcs-models';
  
 @Component({
   standalone: true,
   selector: 'app-xfcs-results-table',
-  imports: [CommonModule, FormsModule, GlassButtonComponent, GlassIconComponent],
+  imports: [CommonModule, FormsModule, GlassButtonComponent, GlassSelectComponent, GlassIconComponent],
   template: `
     <section class="results-panel glass-panel" *ngIf="results.length">
       <div class="panel-header">
@@ -97,14 +98,12 @@ import { SearchResult } from '../api/xfcs-models';
       <div class="xfcs-pagination">
         <div class="xfcs-page-size-selector">
           <span class="xfcs-page-info">Show</span>
-          <select [ngModel]="pageSize()" 
-                  (ngModelChange)="pageSize.set(+$event); page.set(1)" 
-                  class="xfcs-size-select">
-            <option [value]="10">10</option>
-            <option [value]="25">25</option>
-            <option [value]="50">50</option>
-            <option [value]="100">100</option>
-          </select>
+          <app-glass-select
+            [options]="['10', '25', '50', '100']"
+            [ngModel]="pageSize().toString()"
+            (ngModelChange)="pageSize.set(+$event); page.set(1)"
+            style="width: 80px;">
+          </app-glass-select>
           <span class="xfcs-page-info">entries</span>
         </div>
 
@@ -277,26 +276,33 @@ import { SearchResult } from '../api/xfcs-models';
       align-items: center;
       gap: 0.4rem;
     }
-    .xfcs-size-select {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid rgba(167, 139, 250, 0.2);
-      color: var(--text-main);
-      border-radius: 6px;
-      padding: 0.25rem 0.5rem;
-      font-size: 0.75rem;
-      outline: none;
-      cursor: pointer;
-      font-family: inherit;
-      transition: all 0.15s ease;
+    ::ng-deep .xfcs-page-size-selector .select-trigger {
+      min-height: 32px !important;
+      height: 32px !important;
+      padding: 0.2rem 0.6rem !important;
+      border-radius: 8px !important;
+      background: rgba(255, 255, 255, 0.05) !important;
+      border-color: rgba(167, 139, 250, 0.2) !important;
     }
-    .xfcs-size-select:focus {
-      border-color: rgba(167, 139, 250, 0.5);
-      background: rgba(255, 255, 255, 0.1);
+    ::ng-deep .xfcs-page-size-selector .is-open .select-trigger {
+      border-color: var(--accent-color) !important;
     }
-    body.light-theme .xfcs-size-select {
-      background: rgba(99, 102, 241, 0.05);
-      border-color: rgba(99, 102, 241, 0.2);
-      color: #0f172a;
+    ::ng-deep .xfcs-page-size-selector .prefix-icon, 
+    ::ng-deep .xfcs-page-size-selector .chevron-icon {
+      font-size: 1rem !important;
+      width: 1rem !important;
+      height: 1rem !important;
+    }
+    ::ng-deep .xfcs-page-size-selector .selected-label {
+      font-size: 0.8rem !important;
+      color: #fff !important;
+    }
+    body.light-theme ::ng-deep .xfcs-page-size-selector .select-trigger {
+      background: rgba(99, 102, 241, 0.05) !important;
+      border-color: rgba(99, 102, 241, 0.2) !important;
+    }
+    body.light-theme ::ng-deep .xfcs-page-size-selector .selected-label {
+      color: var(--text-main) !important;
     }
   `]
 })

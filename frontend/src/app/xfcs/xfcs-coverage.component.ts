@@ -7,19 +7,21 @@ import {
   OnDestroy,
   OnInit,
   ViewChild,
+  computed,
   signal
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { XfcsApiService } from '../api/xfcs-api.service';
 import { FileCoveragePoint, EnvYearRange } from '../api/xfcs-models';
+import { GlassSelectComponent, GlassOption } from '../shared/components/glass-select.component';
 import * as echarts from 'echarts';
 import type { ECharts, EChartsOption } from 'echarts';
 
 @Component({
   selector: 'app-xfcs-coverage',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, GlassSelectComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="coverage-root">
@@ -34,18 +36,18 @@ import type { ECharts, EChartsOption } from 'echarts';
       <div class="filter-bar glass-panel">
         <div class="filter-group">
           <label>Environment</label>
-          <select [(ngModel)]="selectedEnv" (change)="loadEnvs()">
-            <option value="">All</option>
-            <option *ngFor="let e of envs()" [value]="e.environment">{{ e.environment }}</option>
-          </select>
+          <app-glass-select
+            [options]="envOptions()"
+            [(ngModel)]="selectedEnv"
+            (ngModelChange)="loadEnvs()">
+          </app-glass-select>
         </div>
         <div class="filter-group">
           <label>Granularity</label>
-          <select [(ngModel)]="granularity">
-            <option value="day">Day</option>
-            <option value="week">Week</option>
-            <option value="month">Month</option>
-          </select>
+          <app-glass-select
+            [options]="granularityOptions"
+            [(ngModel)]="granularity">
+          </app-glass-select>
         </div>
         <div class="filter-group">
           <label>Date From</label>
@@ -196,29 +198,50 @@ import type { ECharts, EChartsOption } from 'echarts';
       font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.08em; color: var(--text-muted);
     }
-    .filter-group select,
     .filter-group input {
       padding: 0.45rem 0.7rem;
       border-radius: 8px;
       border: 1px solid var(--card-border);
-      background: var(--bg-gradient-start, #0f172a);
+      background: rgba(255, 255, 255, 0.05);
       color: var(--text-main);
       font-size: 0.85rem;
       min-width: 130px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.15s ease;
     }
-    .filter-group select option {
-      background: var(--bg-gradient-start, #0f172a);
-      color: var(--text-main);
+    .filter-group input:focus {
+      border-color: rgba(167, 139, 250, 0.5);
+      box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.15);
     }
-    :host-context(body.light-theme) .filter-group select,
     :host-context(body.light-theme) .filter-group input {
       background: #ffffff;
       color: #0f172a;
       border-color: rgba(15, 23, 42, 0.2);
     }
-    :host-context(body.light-theme) .filter-group select option {
-      background: #ffffff;
-      color: #0f172a;
+    /* Compact glass-select inside filter groups */
+    ::ng-deep .filter-group .glass-select-container .select-trigger {
+      min-height: 40px !important;
+      padding: 0.4rem 0.8rem !important;
+      border-radius: 10px !important;
+      background: rgba(255, 255, 255, 0.04) !important;
+      border-color: rgba(167, 139, 250, 0.2) !important;
+      min-width: 130px;
+    }
+    ::ng-deep .filter-group .glass-select-container.is-open .select-trigger {
+      border-color: var(--accent-color) !important;
+      box-shadow: 0 0 12px rgba(129, 140, 248, 0.2) !important;
+    }
+    ::ng-deep .filter-group .selected-label {
+      font-size: 0.85rem !important;
+      font-weight: 500 !important;
+    }
+    ::ng-deep .filter-group .placeholder {
+      font-size: 0.85rem !important;
+    }
+    :host-context(body.light-theme) ::ng-deep .filter-group .select-trigger {
+      background: rgba(99, 102, 241, 0.04) !important;
+      border-color: rgba(99, 102, 241, 0.2) !important;
     }
     .run-btn {
       display: flex; align-items: center; gap: 0.4rem;
@@ -362,6 +385,16 @@ export class XfcsCoverageComponent implements OnInit, AfterViewInit, OnDestroy {
   granularity = 'day';
   dateFrom = '';
   dateTo = '';
+
+  readonly granularityOptions: GlassOption[] = [
+    { value: 'day',   label: 'Day' },
+    { value: 'week',  label: 'Week' },
+    { value: 'month', label: 'Month' },
+  ];
+  readonly envOptions = computed(() => [
+    { value: '', label: 'All Environments' } as GlassOption,
+    ...this.envs().map(e => ({ value: e.environment, label: e.environment }) as GlassOption)
+  ]);
 
   private chart?: ECharts;
   private renderTimeout?: ReturnType<typeof setTimeout>;
