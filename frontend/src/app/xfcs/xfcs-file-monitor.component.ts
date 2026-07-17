@@ -69,7 +69,7 @@ import { ToastService } from '../shared/services/toast.service';
           <ng-container *ngFor="let f of paginatedFiles()">
             <tr>
               <td class="mono file-cell">
-                <span class="file-name" [title]="f.fileName || f.absPath">{{ f.fileName || f.absPath }}</span>
+                <span class="file-name" [title]="stripDestinationSuffix(f.fileName) || f.absPath">{{ stripDestinationSuffix(f.fileName) || f.absPath }}</span>
                 <div class="file-meta-row">
                   <span class="env-badge" *ngIf="f.userLotId">{{ f.userLotId }}</span>
                   <span class="dest-badge" *ngIf="embedded && f.destinationFolder">{{ f.destinationFolder }}</span>
@@ -416,6 +416,11 @@ export class XfcsFileMonitorComponent implements OnInit, OnChanges {
 
   totalPages() {
     return Math.ceil(this.totalFiles() / this.pageSize);
+  }
+
+  stripDestinationSuffix(name: string | null | undefined): string {
+    if (!name) return '';
+    return name.replace(/\s*\[(?:PRODUCTION|SANDBOX)[^\]]*\]\s*$/, '').trim();
   }
 
   fileEventLabel(file: FileStatusItem): string {

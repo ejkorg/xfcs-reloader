@@ -332,9 +332,9 @@ export function stripDestinationSuffix(name: string | null | undefined): string 
                           <td class="text-sm text-muted">{{ f.createdAt | date:'M/d/yy, h:mm a' }}</td>
                           <td class="text-sm text-muted">{{ f.resolvedAt | date:'M/d/yy, h:mm a' }}</td>
                         </tr>
-                        <tr *ngIf="f.fileStatus === 'failed' && f.errorReason" class="xfcs-error-row">
-                          <td colspan="6" class="xfcs-error-reason">
-                            <app-glass-icon name="error" [size]="13" color="error"></app-glass-icon>
+                        <tr *ngIf="(f.fileStatus === 'failed' || (f.fileStatus === 'completed' && f.processingDestination === 'SANDBOX')) && f.errorReason" class="xfcs-error-row" [class.sandbox-reason-row]="f.fileStatus === 'completed'">
+                          <td colspan="6" class="xfcs-error-reason" [class.sandbox-reason]="f.fileStatus === 'completed'">
+                            <app-glass-icon [name]="f.fileStatus === 'completed' ? 'info' : 'error'" [size]="13" [color]="f.fileStatus === 'completed' ? 'warning' : 'error'"></app-glass-icon>
                             {{ f.errorReason }}
                           </td>
                         </tr>

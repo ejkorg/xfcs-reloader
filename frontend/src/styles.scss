@@ -602,7 +602,9 @@ body.light-theme .xfcs-hub-table th { background: rgba(248, 247, 255, 0.99); }
 .xfcs-dest-badge.unknown    { color: #94a3b8; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
 
 .xfcs-error-row td { padding: 0.25rem 1.25rem 0.5rem; background: rgba(239,68,68,0.04); }
+.xfcs-error-row.sandbox-reason-row td { background: rgba(245,158,11,0.04); }
 .xfcs-error-reason { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.75rem; color: #ef4444; opacity: 0.85; }
+.xfcs-error-reason.sandbox-reason { color: #f59e0b; }
 
 /* XFCS Files table pagination */
 .xfcs-pagination {

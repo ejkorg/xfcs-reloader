@@ -213,14 +213,20 @@ public class ReloadSessionService {
                 continue;
             }
 
+            String lot = extractLotFromEventMessage(message);
             MutableFileStatus target = findByFileName(byPath, fileName);
             if (target == null) {
                 String syntheticPath = fileName;
-                target = MutableFileStatus.pending(syntheticPath, fileName, null);
+                target = MutableFileStatus.pending(syntheticPath, fileName, lot);
                 byPath.put(syntheticPath, target);
-            } else if (fileName != null && !fileName.isBlank()) {
-                // Prefer ETL/runtime filename over original archive filename for display.
-                target.fileName = fileName;
+            } else {
+                if (fileName != null && !fileName.isBlank()) {
+                    // Prefer ETL/runtime filename over original archive filename for display.
+                    target.fileName = fileName;
+                }
+                if (lot != null && !lot.isBlank() && (target.userLotId == null || target.userLotId.isBlank())) {
+                    target.userLotId = lot;
+                }
             }
 
             String derivedStatus = switch (eventType) {
@@ -659,6 +665,20 @@ public class ReloadSessionService {
         }
 
         return after.trim();
+    }
+
+    private String extractLotFromEventMessage(String message) {
+        if (message == null || message.isBlank()) return null;
+        int lotMarker = message.indexOf(" (Lot:");
+        if (lotMarker < 0) return null;
+        int start = lotMarker + 6;
+        int end = message.indexOf(")", start);
+        if (end < 0) end = message.length();
+        int comma = message.indexOf(",", start);
+        if (comma > 0 && comma < end) {
+            end = comma;
+        }
+        return message.substring(start, end).trim();
     }
 
     private String extractReasonFromEventMessage(String message) {
