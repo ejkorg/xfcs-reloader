@@ -1,0 +1,88 @@
+spring:
+  config:
+    activate:
+      on-profile: onsemi-postgresql
+  datasource:
+    url: "jdbc:postgresql://${refdb.host}:${refdb.port}/${refdb.database}"
+    username: ${refdb.user}
+    password: ${refdb.password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${refdb.pool.max-size:10}
+      minimum-idle: ${refdb.pool.min-idle:2}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      validation-timeout: 5000
+      leak-detection-threshold: 30000
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.xml
+  mail:
+    host: ${SPRING_MAIL_HOST:mailhost.onsemi.com}
+    port: ${SPRING_MAIL_PORT:25}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: ${SPRING_MAIL_SMTP_AUTH:false}
+          starttls:
+            enable: ${SPRING_MAIL_SMTP_STARTTLS_ENABLE:false}
+
+server:
+  port: 8005
+  servlet:
+    context-path: /xfcs-reloader
+  compression:
+    enabled: true
+
+exensio:
+  enabled: true
+  env: ${EXENSIO_ENV:QA}
+  qa-url: ${EXENSIO_QA_URL:https://exnqa.onsemi.com/api}
+  prod-url: ${EXENSIO_PROD_URL:https://api-prod.canyon.aws.pdf.com/api}
+  username: ${EXENSIO_USERNAME:}
+  password: ${EXENSIO_PASSWORD:}
+  dbname: ${EXENSIO_DBNAME:}
+  timeout-minutes: ${EXENSIO_TIMEOUT_MINUTES:60}
+  poll-interval-ms: ${EXENSIO_POLL_INTERVAL_MS:60000}
+
+xfcs:
+  archives-root: /export/home/dpower/archives
+  notification-email-enabled: ${XFCS_NOTIFICATION_EMAIL_ENABLED:true}
+  notification-email-from: ${XFCS_NOTIFICATION_EMAIL_FROM:no-reply@onsemi.com}
+  notification-email-requester-domain: ${XFCS_NOTIFICATION_EMAIL_REQUESTER_DOMAIN:onsemi.com}
+  notification-email-fallback-recipients: ${XFCS_NOTIFICATION_EMAIL_FALLBACK_RECIPIENTS:}
+  notification-email-subject-prefix: ${XFCS_NOTIFICATION_EMAIL_SUBJECT_PREFIX:[XFCS Reloader]}
+  notification-email-max-files: ${XFCS_NOTIFICATION_EMAIL_MAX_FILES:500}
+
+security:
+  allowed-origins: >
+    http://localhost:4200,
+    http://localhost:5173,
+    http://localhost:8080,
+    http://usaz15ls088:8080,
+    http://usaz15ls088:8005,
+    http://usaz15ls088,
+    https://usaz15ls088:8080,
+    https://usaz15ls088:8005,
+    https://usaz15ls088
+
+refdb:
+  db-type: postgresql
+  host: ${XFCS_PG_HOST:localhost}
+  port: ${XFCS_PG_PORT:5432}
+  database: ${XFCS_PG_DATABASE:xfcs_reloader}
+  user: ${XFCS_PG_USER:xfcs}
+  password: ${XFCS_PG_PASSWORD:}
+  pool:
+    max-size: 10
+    min-idle: 2
