@@ -1,6 +1,8 @@
 package com.onsemi.cim.apps.exensio.xfcsreloader.config;
 
 import net.jqwik.api.*;
+import net.jqwik.api.constraints.IntRange;
+import net.jqwik.api.constraints.StringLength;
 
 import static org.assertj.core.api.Assertions.*;
 

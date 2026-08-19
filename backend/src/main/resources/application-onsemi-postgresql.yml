@@ -78,11 +78,14 @@ security:
 
 refdb:
   db-type: postgresql
-  host: ${XFCS_PG_HOST:localhost}
-  port: ${XFCS_PG_PORT:5432}
-  database: ${XFCS_PG_DATABASE:xfcs_reloader}
-  user: ${XFCS_PG_USER:xfcs}
-  password: ${XFCS_PG_PASSWORD:}
+  # Internal refdb QA PostgreSQL instance shared with exensioreload for staging and dispatch in the onsemi environment.
+  host: "10.253.112.87"
+  port: 5432
+  database: "exnr"
+  # Service/SID retained only for legacy Oracle profile compatibility.
+  service: ""
+  user: exnr
+  password: ${REFDB_PASSWORD:}
   pool:
     max-size: 10
     min-idle: 2

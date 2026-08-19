@@ -224,86 +224,86 @@ public class EnvConfigService {
                 String regionGroup = null;
                 String processGroup = "OTHERS";
 
-                // Parse site/area/tester from environment naming (ported/approximated from the old backend logic).
-                try {
-                    String envLower = environment == null ? "" : environment.toLowerCase();
-                    java.util.regex.Matcher m = java.util.regex.Pattern
-                            .compile("^(cp|bk|sz)(ft|sort)_(.+)$")
-                            .matcher(envLower);
-                    if (m.matches()) {
-                        siteCode = m.group(1).toUpperCase(Locale.ROOT);
-                        areaCode = m.group(2).toUpperCase(Locale.ROOT);
-                        testerType = m.group(3).toUpperCase(Locale.ROOT);
-                    } else {
-                        String[] parts = environment == null ? new String[0] : environment.split("_");
-                        if (parts.length >= 3) {
-                            siteCode = parts[0].toUpperCase(Locale.ROOT);
-                            areaCode = parts[1].toUpperCase(Locale.ROOT);
-                            testerType = String.join("_", java.util.Arrays.copyOfRange(parts, 2, parts.length))
-                                    .toUpperCase(Locale.ROOT);
-                        } else if (parts.length == 2) {
-                            siteCode = parts[0].toUpperCase(Locale.ROOT);
-                            areaCode = "";
-                            testerType = parts[1].toUpperCase(Locale.ROOT);
-                        } else if (parts.length == 1 && parts[0] != null) {
-                            siteCode = parts[0].toUpperCase(Locale.ROOT);
-                            areaCode = "";
-                            testerType = "";
-                        }
-                    }
-                } catch (Exception ignore) {
-                    // Leave derived values as empty strings.
-                }
+                // ── Site resolution ─────────────────────────────────────────────────────
+                // dbCode is the authoritative source for which site this environment belongs to.
+                // For edbfound the region token inside the env name identifies the sub-site.
+                // Known area keywords (used to split area from tester type below).
+                final java.util.Set<String> AREA_KEYWORDS = java.util.Set.of(
+                        "ft", "sort", "probe", "ast", "et", "epi", "rel",
+                        "fb5", "fb6", "fb8", "wks", "pcm"
+                );
 
-                if ("edbfound".equalsIgnoreCase(dbCode)) {
-                    String[] tokens = environment.split("_");
-                    parentGroup = tokens.length > 0 ? tokens[0] : "";
-                    regionGroup = tokens.length > 1 ? tokens[1].toUpperCase() : "";
+                String dbLower = dbCode == null ? "" : dbCode.toLowerCase(Locale.ROOT);
+                String[] tokens = environment == null ? new String[0] : environment.split("_");
 
-                    if (environment.contains("_sort_")) {
-                        processGroup = "PROBE";
-                    } else if (environment.contains("_ft_")) {
-                        processGroup = "FINAL TEST";
-                    } else if (environment.contains("_et_")) {
-                        processGroup = "PCM";
-                    } else if (environment.contains("_epi_") || environment.contains("_fb5_") || environment.contains("_fb6_") || environment.contains("_fb8_")) {
-                        processGroup = "WKS";
-                    } else if (environment.contains("_rel_")) {
-                        processGroup = "REL";
+                // 1. Resolve siteName from dbCode
+                switch (dbLower) {
+                    case "edbme"    -> siteName = "DIODES";
+                    case "edbsz"    -> siteName = "SUZHOU";
+                    case "edbmt"    -> siteName = "MountainTop";
+                    case "edbbk"    -> siteName = "BUCHEON";
+                    case "edbcp"    -> siteName = "CEBU";
+                    case "edbfound" -> {
+                        // found_<region>_<area>_<testerType>  — region is the sub-site
+                        // tokens[0] = "found", tokens[1] = region
+                        parentGroup = tokens.length > 0 ? tokens[0].toUpperCase(Locale.ROOT) : "";
+                        regionGroup = tokens.length > 1 ? tokens[1].toUpperCase(Locale.ROOT) : "";
+                        siteName = regionGroup.isBlank() ? parentGroup : regionGroup;
                     }
-                } else {
-                    switch (dbCode.toLowerCase()) {
-                        case "edbme" -> siteName = "DIODES";
-                        case "edbsz" -> siteName = "SUZHOU";
-                        case "edbmt" -> siteName = "MountainTop";
-                        case "edbbk" -> siteName = "BUCHEON";
-                        case "edbcp" -> siteName = "CEBU";
-                    }
-
-                    String envLower = environment.toLowerCase();
-                    boolean isProbe = false;
-                    boolean isFT = false;
-                    for (String pfx : new String[]{"bk", "sz", "me", "mt", "cp"}) {
-                        if (envLower.startsWith(pfx + "sort")) {
-                            isProbe = true; break;
-                        }
-                        if (envLower.startsWith(pfx + "ft")) {
-                            isFT = true; break;
-                        }
-                    }
-
-                    if (isProbe) {
-                        processGroup = "PROBE";
-                    } else if (isFT) {
-                        processGroup = "FINAL TEST";
-                    } else if (envLower.contains("et")) {
-                        processGroup = "PCM";
-                    } else if (envLower.contains("epi") || envLower.contains("fb5") || envLower.contains("fb6") || envLower.contains("fb8")) {
-                        processGroup = "WKS";
-                    } else if (envLower.contains("rel")) {
-                        processGroup = "REL";
+                    default -> {
+                        // Unknown dbCode — use the dbCode itself stripped of "edb" prefix if present
+                        String stripped = dbLower.startsWith("edb") ? dbLower.substring(3) : dbLower;
+                        siteName = stripped.toUpperCase(Locale.ROOT);
                     }
                 }
+                siteCode = siteName != null ? siteName : "";
+
+                // 2. Find the area keyword inside the token list, then everything after it is testerType.
+                //    For edbfound the token list is: [found, region, area, tester...]
+                //    For compact names like "meft_eagle" we split by area keyword within each token too.
+                int areaTokenIdx = -1;
+                String areaTokenValue = "";
+
+                // First pass: look for a token that IS an area keyword
+                for (int i = 0; i < tokens.length; i++) {
+                    if (AREA_KEYWORDS.contains(tokens[i].toLowerCase(Locale.ROOT))) {
+                        areaTokenIdx = i;
+                        areaTokenValue = tokens[i].toUpperCase(Locale.ROOT);
+                        break;
+                    }
+                }
+
+                // Second pass: handle compact tokens like "meft" or "cpsort" where site prefix is glued to area
+                if (areaTokenIdx < 0 && tokens.length > 0) {
+                    for (String kw : AREA_KEYWORDS) {
+                        if (tokens[0].toLowerCase(Locale.ROOT).endsWith(kw)) {
+                            areaTokenIdx = 0;
+                            areaTokenValue = kw.toUpperCase(Locale.ROOT);
+                            break;
+                        }
+                    }
+                }
+
+                if (areaTokenIdx >= 0) {
+                    areaCode = areaTokenValue;
+                    // testerType = everything after the area token, joined with "_"
+                    if (areaTokenIdx + 1 < tokens.length) {
+                        testerType = String.join("_",
+                                java.util.Arrays.copyOfRange(tokens, areaTokenIdx + 1, tokens.length))
+                                .toUpperCase(Locale.ROOT);
+                    }
+                }
+
+                // 3. processGroup from resolved areaCode
+                processGroup = switch (areaCode.toLowerCase(Locale.ROOT)) {
+                    case "sort", "probe"              -> "PROBE";
+                    case "ft", "ast"                  -> "FINAL TEST";
+                    case "et", "pcm"                  -> "PCM";
+                    case "epi", "fb5", "fb6", "fb8", "wks" -> "WKS";
+                    case "rel"                        -> "REL";
+                    default                           -> "OTHERS";
+                };
+
 
                 out.add(new EnvYearRange(
                         environment,
