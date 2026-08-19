@@ -244,16 +244,19 @@ public class EnvConfigService {
                     case "edbbk"    -> siteName = "BUCHEON";
                     case "edbcp"    -> siteName = "CEBU";
                     case "edbfound" -> {
-                        // found_<region>_<area>_<testerType>  — region is the sub-site
-                        // tokens[0] = "found", tokens[1] = region
+                        // found_<region>_<area>_<testerType>  — site = "found_region" combined
+                        // tokens[0] = "found" (or foundry name like "raythn", "elmos")
+                        // tokens[1] = region (e.g. "gb", "de", "sbc")
                         parentGroup = tokens.length > 0 ? tokens[0].toUpperCase(Locale.ROOT) : "";
                         regionGroup = tokens.length > 1 ? tokens[1].toUpperCase(Locale.ROOT) : "";
-                        siteName = regionGroup.isBlank() ? parentGroup : regionGroup;
+                        // Combine parent+region so e.g. raythn_gb_et_rdhm → site = "RAYTHN_GB"
+                        siteName = regionGroup.isBlank()
+                                ? parentGroup
+                                : parentGroup + "_" + regionGroup;
                     }
                     default -> {
-                        // Unknown dbCode — use the dbCode itself stripped of "edb" prefix if present
-                        String stripped = dbLower.startsWith("edb") ? dbLower.substring(3) : dbLower;
-                        siteName = stripped.toUpperCase(Locale.ROOT);
+                        // Unknown dbCode — use the full dbCode uppercased as site name
+                        siteName = dbCode.toUpperCase(Locale.ROOT);
                     }
                 }
                 siteCode = siteName != null ? siteName : "";
