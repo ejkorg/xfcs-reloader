@@ -903,34 +903,50 @@ public class ReloadSessionService {
      */
     public List<FileCoveragePoint> getFileCoverage(String environment, String granularity,
                                                     String dateFrom, String dateTo) {
-        boolean isOracle = isOracleDialect();
+        DbDialect dialect = detectDialect();
 
-        // Date truncation SQL fragment specific to each DB dialect.
-        // Oracle: cast to TIMESTAMP WITH TIME ZONE at UTC first, then TRUNC —
-        //         guards against the DB session timezone shifting bucket boundaries.
-        // H2:     stored as epoch millis, FORMATDATETIME interprets in JVM timezone;
-        //         with hibernate.jdbc.time_zone=UTC and JVM in UTC this is consistent.
-        String pfDateExpr = isOracle
-                ? "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                  "      THEN TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD')\n" +
-                  "      ELSE TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
-                  " END)"
-                : "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                  "      THEN PARSEDATETIME(CAST(pf.archive_year AS VARCHAR) || '-' || CAST(pf.archive_month AS VARCHAR) || '-01', 'yyyy-M-d')\n" +
-                  "      ELSE CAST(pf.created_at AS DATE)\n" +
-                  " END)";
+        // Date expression: resolve to a DATE/TIMESTAMP from archive_year/month when present,
+        // otherwise fall back to the row's created_at.
+        //
+        // Oracle:     TO_DATE(year||'-'||month||'-01') / TRUNC(created_at AT TIME ZONE 'UTC')
+        // PostgreSQL: MAKE_DATE(archive_year, archive_month, 1) / DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')
+        // H2:         PARSEDATETIME(year||'-'||month||'-01') / CAST(created_at AS DATE)
+        String pfDateExpr = switch (dialect) {
+            case ORACLE ->
+                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
+                "      THEN TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD')\n" +
+                "      ELSE TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
+                " END)";
+            case POSTGRESQL ->
+                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
+                "      THEN MAKE_DATE(pf.archive_year, pf.archive_month, 1)\n" +
+                "      ELSE DATE_TRUNC('day', pf.created_at::timestamptz AT TIME ZONE 'UTC')::date\n" +
+                " END)";
+            default -> // H2
+                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
+                "      THEN PARSEDATETIME(CAST(pf.archive_year AS VARCHAR) || '-' || CAST(pf.archive_month AS VARCHAR) || '-01', 'yyyy-M-d')\n" +
+                "      ELSE CAST(pf.created_at AS DATE)\n" +
+                " END)";
+        };
 
-        String dateTruncExpr = isOracle
-                ? switch (granularity) {
-                    case "week"  -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'IW'), 'YYYY-MM-DD')";
-                    case "month" -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'MM'), 'YYYY-MM-DD')";
-                    default      -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'DD'), 'YYYY-MM-DD')";
-                  }
-                : switch (granularity) {
-                    case "week"  -> "FORMATDATETIME(" + pfDateExpr + ", 'YYYY-ww')";
-                    case "month" -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM') || '-01'";
-                    default      -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM-dd')";
-                  };
+        // Bucket truncation: always produce a YYYY-MM-DD string so the frontend can parse uniformly.
+        String dateTruncExpr = switch (dialect) {
+            case ORACLE -> switch (granularity) {
+                case "week"  -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'IW'), 'YYYY-MM-DD')";
+                case "month" -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'MM'), 'YYYY-MM-DD')";
+                default      -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'DD'), 'YYYY-MM-DD')";
+            };
+            case POSTGRESQL -> switch (granularity) {
+                case "week"  -> "TO_CHAR(DATE_TRUNC('week',  " + pfDateExpr + "::date), 'YYYY-MM-DD')";
+                case "month" -> "TO_CHAR(DATE_TRUNC('month', " + pfDateExpr + "::date), 'YYYY-MM-DD')";
+                default      -> "TO_CHAR(" + pfDateExpr + "::date, 'YYYY-MM-DD')";
+            };
+            default -> switch (granularity) { // H2
+                case "week"  -> "FORMATDATETIME(" + pfDateExpr + ", 'YYYY-ww')";
+                case "month" -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM') || '-01'";
+                default      -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM-dd')";
+            };
+        };
 
         StringBuilder sql = new StringBuilder(
                 "SELECT " + dateTruncExpr + " AS bucket,\n" +
@@ -957,8 +973,6 @@ public class ReloadSessionService {
                 ") pf\n" +
                 "WHERE 1=1\n");
 
-        // Use named parameters to avoid positional index issues and Oracle JDBC type binding.
-        // For date params we pass a java.sql.Timestamp which Oracle JDBC handles correctly.
         if (environment != null && !environment.isBlank()) {
             sql.append("  AND pf.environment = :env\n");
         }
@@ -978,7 +992,6 @@ public class ReloadSessionService {
             query.setParameter("env", environment);
         }
         if (dateFrom != null && !dateFrom.isBlank()) {
-            // Pass as java.sql.Timestamp so Oracle JDBC binds it as TIMESTAMP, not BINARY_FLOAT
             query.setParameter("dateFrom", java.sql.Timestamp.from(parseDateStart(dateFrom)));
         }
         if (dateTo != null && !dateTo.isBlank()) {
@@ -1002,28 +1015,42 @@ public class ReloadSessionService {
         return results;
     }
 
-    private boolean isOracleDialect() {
-        // Check the JPA database-platform property set in application.yml.
-        // This avoids any runtime connection unwrapping which can throw in managed JPA contexts.
+    private enum DbDialect { ORACLE, POSTGRESQL, H2 }
+
+    private DbDialect detectDialect() {
         try {
-            Object platformProp = entityManager.getEntityManagerFactory()
-                    .getProperties()
-                    .get("hibernate.dialect");
-            if (platformProp != null && platformProp.toString().toLowerCase().contains("oracle")) {
-                log.debug("[Coverage] Detected Oracle dialect from hibernate.dialect property: {}", platformProp);
-                return true;
+            Map<String, Object> props = entityManager.getEntityManagerFactory().getProperties();
+
+            // hibernate.dialect is the canonical key Spring Boot resolves database-platform into
+            for (String key : new String[]{"hibernate.dialect", "spring.jpa.database-platform",
+                    "jakarta.persistence.database-product-name", "javax.persistence.database-product-name"}) {
+                Object val = props.get(key);
+                if (val == null) continue;
+                String s = val.toString().toLowerCase();
+                if (s.contains("oracle"))     { log.debug("[Coverage] Detected Oracle via {}: {}", key, val);     return DbDialect.ORACLE; }
+                if (s.contains("postgresql") || s.contains("postgres")) {
+                    log.debug("[Coverage] Detected PostgreSQL via {}: {}", key, val);
+                    return DbDialect.POSTGRESQL;
+                }
             }
-            // Also check JPA database-platform variant
-            Object jpaDialect = entityManager.getEntityManagerFactory()
-                    .getProperties()
-                    .get("javax.persistence.database-product-name");
-            if (jpaDialect != null && jpaDialect.toString().toLowerCase().contains("oracle")) {
-                return true;
+
+            // Last resort: ask JDBC directly
+            try {
+                String dbProduct = entityManager.unwrap(java.sql.Connection.class)
+                        .getMetaData().getDatabaseProductName();
+                if (dbProduct != null) {
+                    String s = dbProduct.toLowerCase();
+                    if (s.contains("oracle"))                            return DbDialect.ORACLE;
+                    if (s.contains("postgresql") || s.contains("postgres")) return DbDialect.POSTGRESQL;
+                }
+            } catch (Exception e2) {
+                log.debug("[Coverage] JDBC metadata check failed: {}", e2.getMessage());
             }
+
         } catch (Exception e) {
-            log.warn("[Coverage] Could not detect DB dialect, defaulting to non-Oracle: {}", e.getMessage());
+            log.warn("[Coverage] Could not detect DB dialect, defaulting to H2: {}", e.getMessage());
         }
-        return false;
+        return DbDialect.H2;
     }
 
     private static long toLong(Object value) {

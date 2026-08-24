@@ -669,7 +669,7 @@ export class XfcsSessionsComponent implements OnInit, AfterViewInit, OnDestroy {
   calcProgress(s: ReloadStatus): number {
     if (!s.totalFiles) return 0;
     const done = (s.completedFiles || 0) + (s.failedFiles || 0);
-    return Math.round((done / s.totalFiles) * 100);
+    return Math.min(100, Math.round((done / s.totalFiles) * 100));
   }
 
   // Expose module-level helper to template
