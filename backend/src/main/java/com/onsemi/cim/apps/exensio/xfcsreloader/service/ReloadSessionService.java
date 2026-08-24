@@ -911,16 +911,23 @@ public class ReloadSessionService {
         // Oracle:     TO_DATE(year||'-'||month||'-01') / TRUNC(created_at AT TIME ZONE 'UTC')
         // PostgreSQL: MAKE_DATE(archive_year, archive_month, 1) / DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')
         // H2:         PARSEDATETIME(year||'-'||month||'-01') / CAST(created_at AS DATE)
+        // pfDateExpr: resolves to a TIMESTAMP value for each row.
+        // archive_year/month takes priority (represents the original file date);
+        // falls back to created_at (already a TIMESTAMP in all dialects).
+        //
+        // PostgreSQL note: created_at is TIMESTAMP WITHOUT TIME ZONE stored at UTC,
+        //   so no cast is needed. MAKE_DATE returns DATE; cast to TIMESTAMP for uniform
+        //   comparison with the :dateFrom/:dateTo java.sql.Timestamp parameters.
         String pfDateExpr = switch (dialect) {
             case ORACLE ->
                 "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                "      THEN TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD')\n" +
+                "      THEN CAST(TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD') AS TIMESTAMP)\n" +
                 "      ELSE TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
                 " END)";
             case POSTGRESQL ->
                 "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                "      THEN MAKE_DATE(pf.archive_year, pf.archive_month, 1)\n" +
-                "      ELSE DATE_TRUNC('day', pf.created_at::timestamptz AT TIME ZONE 'UTC')::date\n" +
+                "      THEN MAKE_DATE(pf.archive_year, pf.archive_month, 1)::timestamp\n" +
+                "      ELSE DATE_TRUNC('day', pf.created_at)\n" +
                 " END)";
             default -> // H2
                 "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
@@ -929,7 +936,7 @@ public class ReloadSessionService {
                 " END)";
         };
 
-        // Bucket truncation: always produce a YYYY-MM-DD string so the frontend can parse uniformly.
+        // Bucket truncation: always produce a YYYY-MM-DD string for uniform frontend parsing.
         String dateTruncExpr = switch (dialect) {
             case ORACLE -> switch (granularity) {
                 case "week"  -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'IW'), 'YYYY-MM-DD')";
@@ -937,9 +944,9 @@ public class ReloadSessionService {
                 default      -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'DD'), 'YYYY-MM-DD')";
             };
             case POSTGRESQL -> switch (granularity) {
-                case "week"  -> "TO_CHAR(DATE_TRUNC('week',  " + pfDateExpr + "::date), 'YYYY-MM-DD')";
-                case "month" -> "TO_CHAR(DATE_TRUNC('month', " + pfDateExpr + "::date), 'YYYY-MM-DD')";
-                default      -> "TO_CHAR(" + pfDateExpr + "::date, 'YYYY-MM-DD')";
+                case "week"  -> "TO_CHAR(DATE_TRUNC('week',  " + pfDateExpr + "), 'YYYY-MM-DD')";
+                case "month" -> "TO_CHAR(DATE_TRUNC('month', " + pfDateExpr + "), 'YYYY-MM-DD')";
+                default      -> "TO_CHAR(" + pfDateExpr + ", 'YYYY-MM-DD')";
             };
             default -> switch (granularity) { // H2
                 case "week"  -> "FORMATDATETIME(" + pfDateExpr + ", 'YYYY-ww')";
@@ -1021,26 +1028,34 @@ public class ReloadSessionService {
         try {
             Map<String, Object> props = entityManager.getEntityManagerFactory().getProperties();
 
-            // hibernate.dialect is the canonical key Spring Boot resolves database-platform into
-            for (String key : new String[]{"hibernate.dialect", "spring.jpa.database-platform",
-                    "jakarta.persistence.database-product-name", "javax.persistence.database-product-name"}) {
+            // Spring Boot translates spring.jpa.database-platform → hibernate.dialect in the EMF.
+            // Check that first, then fallback keys.
+            for (String key : new String[]{
+                    "hibernate.dialect",
+                    "spring.jpa.database-platform",
+                    "jakarta.persistence.database-product-name",
+                    "javax.persistence.database-product-name"}) {
                 Object val = props.get(key);
                 if (val == null) continue;
                 String s = val.toString().toLowerCase();
-                if (s.contains("oracle"))     { log.debug("[Coverage] Detected Oracle via {}: {}", key, val);     return DbDialect.ORACLE; }
+                if (s.contains("oracle")) {
+                    log.debug("[Coverage] Detected Oracle via {}: {}", key, val);
+                    return DbDialect.ORACLE;
+                }
                 if (s.contains("postgresql") || s.contains("postgres")) {
                     log.debug("[Coverage] Detected PostgreSQL via {}: {}", key, val);
                     return DbDialect.POSTGRESQL;
                 }
             }
 
-            // Last resort: ask JDBC directly
+            // Last resort: ask JDBC directly — works regardless of how properties are keyed
             try {
                 String dbProduct = entityManager.unwrap(java.sql.Connection.class)
                         .getMetaData().getDatabaseProductName();
                 if (dbProduct != null) {
                     String s = dbProduct.toLowerCase();
-                    if (s.contains("oracle"))                            return DbDialect.ORACLE;
+                    log.debug("[Coverage] Detected dialect via JDBC metadata: {}", dbProduct);
+                    if (s.contains("oracle"))                               return DbDialect.ORACLE;
                     if (s.contains("postgresql") || s.contains("postgres")) return DbDialect.POSTGRESQL;
                 }
             } catch (Exception e2) {
