@@ -904,79 +904,80 @@ public class ReloadSessionService {
     public List<FileCoveragePoint> getFileCoverage(String environment, String granularity,
                                                     String dateFrom, String dateTo) {
         DbDialect dialect = detectDialect();
+        log.debug("[Coverage] Detected dialect: {}, granularity: {}", dialect, granularity);
 
-        // Date expression: resolve to a DATE/TIMESTAMP from archive_year/month when present,
-        // otherwise fall back to the row's created_at.
+        // Build expressions for the subquery that computes the effective date and bucket for each row.
+        // The subquery computes 'eff_date' (the TIMESTAMP to use for filtering/grouping)
+        // and 'bucket' (the truncated string for grouping).
         //
-        // Oracle:     TO_DATE(year||'-'||month||'-01') / TRUNC(created_at AT TIME ZONE 'UTC')
-        // PostgreSQL: MAKE_DATE(archive_year, archive_month, 1) / DATE_TRUNC('day', created_at AT TIME ZONE 'UTC')
-        // H2:         PARSEDATETIME(year||'-'||month||'-01') / CAST(created_at AS DATE)
-        // pfDateExpr: resolves to a TIMESTAMP value for each row.
-        // archive_year/month takes priority (represents the original file date);
-        // falls back to created_at (already a TIMESTAMP in all dialects).
-        //
-        // PostgreSQL note: created_at is TIMESTAMP WITHOUT TIME ZONE stored at UTC,
-        //   so no cast is needed. MAKE_DATE returns DATE; cast to TIMESTAMP for uniform
-        //   comparison with the :dateFrom/:dateTo java.sql.Timestamp parameters.
-        String pfDateExpr = switch (dialect) {
+        // This avoids repeating complex CASE WHEN expressions in WHERE/GROUP BY clauses,
+        // which can cause issues with nested subquery references on some databases.
+
+        String effDateExpr = switch (dialect) {
             case ORACLE ->
-                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                "      THEN CAST(TO_DATE(pf.archive_year || '-' || pf.archive_month || '-01', 'YYYY-MM-DD') AS TIMESTAMP)\n" +
-                "      ELSE TRUNC(CAST(pf.created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
-                " END)";
+                "CASE WHEN archive_year IS NOT NULL AND archive_month IS NOT NULL\n" +
+                "     THEN CAST(TO_DATE(archive_year || '-' || archive_month || '-01', 'YYYY-MM-DD') AS TIMESTAMP)\n" +
+                "     ELSE TRUNC(CAST(created_at AS TIMESTAMP) AT TIME ZONE 'UTC')\n" +
+                "END";
             case POSTGRESQL ->
-                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                "      THEN MAKE_DATE(pf.archive_year, pf.archive_month, 1)::timestamp\n" +
-                "      ELSE DATE_TRUNC('day', pf.created_at)\n" +
-                " END)";
+                "CASE WHEN archive_year IS NOT NULL AND archive_month IS NOT NULL\n" +
+                "     THEN MAKE_DATE(archive_year, archive_month, 1)::timestamp\n" +
+                "     ELSE DATE_TRUNC('day', created_at)\n" +
+                "END";
             default -> // H2
-                "(CASE WHEN pf.archive_year IS NOT NULL AND pf.archive_month IS NOT NULL\n" +
-                "      THEN PARSEDATETIME(CAST(pf.archive_year AS VARCHAR) || '-' || CAST(pf.archive_month AS VARCHAR) || '-01', 'yyyy-M-d')\n" +
-                "      ELSE CAST(pf.created_at AS DATE)\n" +
-                " END)";
+                "CASE WHEN archive_year IS NOT NULL AND archive_month IS NOT NULL\n" +
+                "     THEN PARSEDATETIME(CAST(archive_year AS VARCHAR) || '-' || CAST(archive_month AS VARCHAR) || '-01', 'yyyy-M-d')\n" +
+                "     ELSE CAST(created_at AS DATE)\n" +
+                "END";
         };
 
-        // Bucket truncation: always produce a YYYY-MM-DD string for uniform frontend parsing.
-        String dateTruncExpr = switch (dialect) {
+        String bucketExpr = switch (dialect) {
             case ORACLE -> switch (granularity) {
-                case "week"  -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'IW'), 'YYYY-MM-DD')";
-                case "month" -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'MM'), 'YYYY-MM-DD')";
-                default      -> "TO_CHAR(TRUNC(" + pfDateExpr + ", 'DD'), 'YYYY-MM-DD')";
+                case "week"  -> "TO_CHAR(TRUNC((" + effDateExpr + "), 'IW'), 'YYYY-MM-DD')";
+                case "month" -> "TO_CHAR(TRUNC((" + effDateExpr + "), 'MM'), 'YYYY-MM-DD')";
+                default      -> "TO_CHAR(TRUNC((" + effDateExpr + "), 'DD'), 'YYYY-MM-DD')";
             };
             case POSTGRESQL -> switch (granularity) {
-                case "week"  -> "TO_CHAR(DATE_TRUNC('week',  " + pfDateExpr + "), 'YYYY-MM-DD')";
-                case "month" -> "TO_CHAR(DATE_TRUNC('month', " + pfDateExpr + "), 'YYYY-MM-DD')";
-                default      -> "TO_CHAR(" + pfDateExpr + ", 'YYYY-MM-DD')";
+                case "week"  -> "TO_CHAR(DATE_TRUNC('week',  (" + effDateExpr + ")), 'YYYY-MM-DD')";
+                case "month" -> "TO_CHAR(DATE_TRUNC('month', (" + effDateExpr + ")), 'YYYY-MM-DD')";
+                default      -> "TO_CHAR((" + effDateExpr + "), 'YYYY-MM-DD')";
             };
             default -> switch (granularity) { // H2
-                case "week"  -> "FORMATDATETIME(" + pfDateExpr + ", 'YYYY-ww')";
-                case "month" -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM') || '-01'";
-                default      -> "FORMATDATETIME(" + pfDateExpr + ", 'yyyy-MM-dd')";
+                case "week"  -> "FORMATDATETIME((" + effDateExpr + "), 'YYYY-ww')";
+                case "month" -> "FORMATDATETIME((" + effDateExpr + "), 'yyyy-MM') || '-01'";
+                default      -> "FORMATDATETIME((" + effDateExpr + "), 'yyyy-MM-dd')";
             };
         };
 
+        // Build the inner subquery that computes eff_date and bucket for each row.
+        // The outer query groups by bucket and applies WHERE filters on eff_date.
         StringBuilder sql = new StringBuilder(
-                "SELECT " + dateTruncExpr + " AS bucket,\n" +
-                "       pf.environment,\n" +
+                "SELECT bucket, environment,\n" +
                 "       COUNT(*)                        AS total,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'completed'                              THEN 1 ELSE 0 END) AS done,\n" +
-                "       SUM(CASE WHEN pf.file_status IN ('staging','exensio_loading','etl_complete')   THEN 1 ELSE 0 END) AS enqueued,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'pending'                                THEN 1 ELSE 0 END) AS staged,\n" +
-                "       SUM(CASE WHEN pf.file_status = 'failed'                                 THEN 1 ELSE 0 END) AS failed\n" +
+                "       SUM(CASE WHEN file_status = 'completed' THEN 1 ELSE 0 END) AS done,\n" +
+                "       SUM(CASE WHEN file_status IN ('staging','exensio_loading','etl_complete') THEN 1 ELSE 0 END) AS enqueued,\n" +
+                "       SUM(CASE WHEN file_status = 'pending' THEN 1 ELSE 0 END) AS staged,\n" +
+                "       SUM(CASE WHEN file_status = 'failed' THEN 1 ELSE 0 END) AS failed\n" +
                 "FROM (\n" +
-                "  SELECT created_at, environment, file_status, archive_year, archive_month\n" +
-                "  FROM xfcs_dearchiver_reload_pending_files\n" +
-                "  UNION ALL\n" +
-                "  SELECT s.created_at, s.environment,\n" +
-                "         (CASE WHEN ev.event_type = 'file_completed' THEN 'completed'\n" +
-                "               WHEN ev.event_type = 'file_failed'    THEN 'failed'\n" +
-                "               WHEN ev.event_type = 'file_unverified' THEN 'failed'\n" +
-                "               ELSE 'pending' END) AS file_status,\n" +
-                "         ev.archive_year,\n" +
-                "         ev.archive_month\n" +
-                "  FROM xfcs_dearchiver_reload_session_events ev\n" +
-                "  JOIN xfcs_dearchiver_reload_sessions s ON s.session_id = ev.session_id\n" +
-                "  WHERE ev.event_type IN ('file_completed', 'file_failed', 'file_unverified')\n" +
+                "  SELECT (" + bucketExpr + ") AS bucket,\n" +
+                "         (" + effDateExpr + ") AS eff_date,\n" +
+                "         environment,\n" +
+                "         file_status\n" +
+                "  FROM (\n" +
+                "    SELECT created_at, environment, file_status, archive_year, archive_month\n" +
+                "    FROM xfcs_dearchiver_reload_pending_files\n" +
+                "    UNION ALL\n" +
+                "    SELECT s.created_at, s.environment,\n" +
+                "           (CASE WHEN ev.event_type = 'file_completed' THEN 'completed'\n" +
+                "                 WHEN ev.event_type = 'file_failed'    THEN 'failed'\n" +
+                "                 WHEN ev.event_type = 'file_unverified' THEN 'failed'\n" +
+                "                 ELSE 'pending' END) AS file_status,\n" +
+                "           ev.archive_year,\n" +
+                "           ev.archive_month\n" +
+                "    FROM xfcs_dearchiver_reload_session_events ev\n" +
+                "    JOIN xfcs_dearchiver_reload_sessions s ON s.session_id = ev.session_id\n" +
+                "    WHERE ev.event_type IN ('file_completed', 'file_failed', 'file_unverified')\n" +
+                "  ) raw\n" +
                 ") pf\n" +
                 "WHERE 1=1\n");
 
@@ -984,42 +985,60 @@ public class ReloadSessionService {
             sql.append("  AND pf.environment = :env\n");
         }
         if (dateFrom != null && !dateFrom.isBlank()) {
-            sql.append("  AND ").append(pfDateExpr).append(" >= :dateFrom\n");
+            sql.append("  AND pf.eff_date >= :dateFrom\n");
         }
         if (dateTo != null && !dateTo.isBlank()) {
-            sql.append("  AND ").append(pfDateExpr).append(" < :dateTo\n");
+            sql.append("  AND pf.eff_date < :dateTo\n");
         }
 
-        sql.append("GROUP BY ").append(dateTruncExpr).append(", pf.environment\n")
-           .append("ORDER BY bucket ASC, pf.environment ASC");
+        sql.append("GROUP BY bucket, environment\n")
+           .append("ORDER BY bucket ASC, environment ASC");
 
-        Query query = entityManager.createNativeQuery(sql.toString());
+        String sqlString = sql.toString();
+        
+        try {
+            log.debug("[Coverage] Detected dialect: {}", dialect);
+            log.debug("[Coverage] Generated SQL:\n{}", sqlString);
+            
+            Query query = entityManager.createNativeQuery(sqlString);
 
-        if (environment != null && !environment.isBlank()) {
-            query.setParameter("env", environment);
-        }
-        if (dateFrom != null && !dateFrom.isBlank()) {
-            query.setParameter("dateFrom", java.sql.Timestamp.from(parseDateStart(dateFrom)));
-        }
-        if (dateTo != null && !dateTo.isBlank()) {
-            query.setParameter("dateTo", java.sql.Timestamp.from(parseDateEnd(dateTo)));
-        }
+            if (environment != null && !environment.isBlank()) {
+                query.setParameter("env", environment);
+                log.debug("[Coverage] Param env={}", environment);
+            }
+            if (dateFrom != null && !dateFrom.isBlank()) {
+                java.sql.Timestamp fromTs = java.sql.Timestamp.from(parseDateStart(dateFrom));
+                query.setParameter("dateFrom", fromTs);
+                log.debug("[Coverage] Param dateFrom={}", fromTs);
+            }
+            if (dateTo != null && !dateTo.isBlank()) {
+                java.sql.Timestamp toTs = java.sql.Timestamp.from(parseDateEnd(dateTo));
+                query.setParameter("dateTo", toTs);
+                log.debug("[Coverage] Param dateTo={}", toTs);
+            }
 
-        @SuppressWarnings("unchecked")
-        List<Object[]> rows = query.getResultList();
+            @SuppressWarnings("unchecked")
+            List<Object[]> rows = query.getResultList();
 
-        List<FileCoveragePoint> results = new ArrayList<>(rows.size());
-        for (Object[] row : rows) {
-            String bkt = row[0] != null ? row[0].toString() : "unknown";
-            String env = row[1] != null ? row[1].toString() : "unknown";
-            long total    = toLong(row[2]);
-            long done     = toLong(row[3]);
-            long enqueued = toLong(row[4]);
-            long staged   = toLong(row[5]);
-            long failed   = toLong(row[6]);
-            results.add(new FileCoveragePoint(bkt, env, total, done, enqueued, staged, failed));
+            List<FileCoveragePoint> results = new ArrayList<>(rows.size());
+            for (Object[] row : rows) {
+                String bkt = row[0] != null ? row[0].toString() : "unknown";
+                String env = row[1] != null ? row[1].toString() : "unknown";
+                long total    = toLong(row[2]);
+                long done     = toLong(row[3]);
+                long enqueued = toLong(row[4]);
+                long staged   = toLong(row[5]);
+                long failed   = toLong(row[6]);
+                results.add(new FileCoveragePoint(bkt, env, total, done, enqueued, staged, failed));
+            }
+            log.info("[Coverage] Returning {} coverage data points", results.size());
+            return results;
+        } catch (Exception e) {
+            log.error("[Coverage] Query failed for dialect={}, environment={}, granularity={}, dateFrom={}, dateTo={}",
+                    dialect, environment, granularity, dateFrom, dateTo, e);
+            log.error("[Coverage] Failed SQL:\n{}", sqlString);
+            throw new RuntimeException("Failed to fetch file coverage data: " + e.getMessage(), e);
         }
-        return results;
     }
 
     private enum DbDialect { ORACLE, POSTGRESQL, H2 }
