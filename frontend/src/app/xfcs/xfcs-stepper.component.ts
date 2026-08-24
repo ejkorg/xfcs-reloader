@@ -13,6 +13,7 @@ import { ExensioPreCheckDialogComponent } from './exensio-precheck-dialog.compon
 import { XfcsApiService } from '../api/xfcs-api.service';
 import { EnvYearRange, ExensioPreCheckRequest, ExensioPreCheckResponse, ReloadRequest, SearchCriteria, SearchResult, ReloadStatus, ReloadSession } from '../api/xfcs-models';
 import { ToastService } from '../shared/services/toast.service';
+import { AuthService } from '../auth/auth.service';
 
 export interface SearchRow {
   id: number;
@@ -1452,7 +1453,8 @@ export class XfcsStepperComponent implements OnInit {
   constructor(
     private api: XfcsApiService, 
     private toast: ToastService,
-    private router: Router
+    private router: Router,
+    private auth: AuthService
   ) {}
 
   ngOnInit() {
@@ -1594,6 +1596,7 @@ export class XfcsStepperComponent implements OnInit {
       site: env?.siteName ?? '',
       area: env?.areaCode ?? '',
       testerType: env?.testerType ?? '',
+      requester: this.auth.currentUser()?.username,
       filePaths: filesToProcess.map((f: SearchResult) => f.path),
       files: filesToProcess.map((f: SearchResult) => ({
         path: f.path,

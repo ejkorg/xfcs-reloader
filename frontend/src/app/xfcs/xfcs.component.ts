@@ -5,6 +5,7 @@ import { Subscription, firstValueFrom, catchError, of } from 'rxjs';
 import { XfcsApiService } from '../api/xfcs-api.service';
 import { SseService } from '../api/sse.service';
 import { DashboardData, EnvYearRange, ReloadSessionEvent, ReloadStatus, SearchResult } from '../api/xfcs-models';
+import { AuthService } from '../auth/auth.service';
 import { SearchResultsDialogComponent } from './search-results-dialog.component';
 import { EnvInfoDialogComponent } from './env-info-dialog.component';
 import { FindArchiveLotsDialogComponent } from './find-archive-lots-dialog.component';
@@ -131,7 +132,8 @@ export class XfcsComponent implements OnInit, OnDestroy {
     private api: XfcsApiService,
     private sse: SseService,
     private dialog: MatDialog,
-    private toast: ToastService
+    private toast: ToastService,
+    private auth: AuthService
   ) {}
 
   ngOnInit(): void {
@@ -283,6 +285,7 @@ export class XfcsComponent implements OnInit, OnDestroy {
       site: env.siteName || '',
       area: env.areaCode || '',
       testerType: env.testerType || '',
+      requester: this.auth.currentUser()?.username,
       filePaths: targetFiles.map(r => r.path)
     }).subscribe({
       next: (session: any) => {
