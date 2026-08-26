@@ -20,6 +20,15 @@ public class PpLogDbProperties {
     private Pool pool = new Pool();
     private boolean enabled = true;
 
+    /**
+     * Timezone of the Oracle server hosting pp_log.
+     * process_datetime is written by third-party ETL in the server's local timezone.
+     * Not currently used for querying (no timestamp filter) but kept for consistency
+     * with exensioreload and future use.
+     * Confirmed Oracle server timezone: -07:00 (America/Phoenix)
+     */
+    private String serverTimezone = "America/Phoenix";
+
     public String getHost() { return host; }
     public void setHost(String host) { this.host = host; }
     public int getPort() { return port; }
@@ -36,6 +45,8 @@ public class PpLogDbProperties {
     public void setPool(Pool pool) { this.pool = pool; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public String getServerTimezone() { return serverTimezone; }
+    public void setServerTimezone(String serverTimezone) { this.serverTimezone = serverTimezone == null ? "America/Phoenix" : serverTimezone; }
 
     public boolean isConfigured() {
         return host != null && !host.isBlank();
