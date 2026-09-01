@@ -1,7 +1,7 @@
 package com.onsemi.cim.apps.exensio.xfcsreloader.service;
 
 import com.onsemi.cim.apps.exensio.xfcsreloader.config.XfcsProperties;
-
+import com.onsemi.cim.apps.exensio.xfcsreloader.util.FilenameParser;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.ArchiveLotDetail;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.SearchCriteria;
 import com.onsemi.cim.apps.exensio.xfcsreloader.web.dto.SearchResult;
@@ -487,10 +487,7 @@ public class ArchiveSearchService {
     }
 
     private String extractWafer(String fileName) {
-        if (fileName == null) return null;
-        var matcher = java.util.regex.Pattern.compile("(?:wafer|wf|w)[_-]?([A-Za-z0-9]+)", java.util.regex.Pattern.CASE_INSENSITIVE)
-                .matcher(fileName);
-        return matcher.find() ? matcher.group(1) : null;
+        return FilenameParser.parseWaferId(fileName);
     }
 
     private boolean matchesWafer(String fileName, String expectedWafer) {

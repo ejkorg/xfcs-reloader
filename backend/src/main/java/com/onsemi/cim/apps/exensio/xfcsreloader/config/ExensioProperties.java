@@ -25,6 +25,22 @@ public class ExensioProperties {
     /** Poll interval in milliseconds */
     private long pollIntervalMs = 60000;
 
+    /** Prefer the Exensio raw-SQL endpoint before the lot-wafer-lookup endpoint. */
+    private boolean preferRawSql = true;
+
+    /** Upper bound on rows returned by generated raw-SQL queries. */
+    private int rawSqlRowLimit = 200;
+
+    /** HTTP timeout in seconds for raw-SQL calls. */
+    private int rawSqlTimeoutSeconds = 20;
+
+    /**
+     * Maximum allowed gap (in minutes) between a pending file's creation time and the
+     * Exensio {@code op_log.insert_time}. Used to reject stale rows and avoid matching
+     * an old load of the same lot. Default: 60.
+     */
+    private int maxLookupWindowMinutes = 60;
+
     public boolean isConfigured() {
         return enabled && resolvedBaseUrl() != null && !resolvedBaseUrl().isBlank();
     }
@@ -88,4 +104,16 @@ public class ExensioProperties {
 
     public long getPollIntervalMs() { return pollIntervalMs; }
     public void setPollIntervalMs(long pollIntervalMs) { this.pollIntervalMs = pollIntervalMs; }
+
+    public boolean isPreferRawSql() { return preferRawSql; }
+    public void setPreferRawSql(boolean preferRawSql) { this.preferRawSql = preferRawSql; }
+
+    public int getRawSqlRowLimit() { return rawSqlRowLimit; }
+    public void setRawSqlRowLimit(int rawSqlRowLimit) { this.rawSqlRowLimit = rawSqlRowLimit; }
+
+    public int getRawSqlTimeoutSeconds() { return rawSqlTimeoutSeconds; }
+    public void setRawSqlTimeoutSeconds(int rawSqlTimeoutSeconds) { this.rawSqlTimeoutSeconds = rawSqlTimeoutSeconds; }
+
+    public int getMaxLookupWindowMinutes() { return maxLookupWindowMinutes; }
+    public void setMaxLookupWindowMinutes(int maxLookupWindowMinutes) { this.maxLookupWindowMinutes = maxLookupWindowMinutes; }
 }

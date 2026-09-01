@@ -75,6 +75,10 @@ exensio:
   timeout-minutes: ${EXENSIO_TIMEOUT_MINUTES:60}
   poll-interval-ms: ${EXENSIO_POLL_INTERVAL_MS:60000}
   precheck-row-limit: ${EXENSIO_PRECHECK_ROW_LIMIT:10000}
+  prefer-raw-sql: ${EXENSIO_PREFER_RAW_SQL:true}
+  raw-sql-row-limit: ${EXENSIO_RAW_SQL_ROW_LIMIT:200}
+  raw-sql-timeout-seconds: ${EXENSIO_RAW_SQL_TIMEOUT_SECONDS:20}
+  max-lookup-window-minutes: ${EXENSIO_MAX_LOOKUP_WINDOW_MINUTES:60}
 
 xfcs:
   feature-enabled: ${XFCS_FEATURE_ENABLED:true}

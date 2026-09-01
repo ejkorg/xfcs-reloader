@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.exensio.BatchLookupResult;
 import com.onsemi.cim.apps.exensio.xfcsreloader.service.exensio.ExensioClient;
+import com.onsemi.cim.apps.exensio.xfcsreloader.service.exensio.ExensioPgcKeyResolver;
 import com.onsemi.cim.apps.exensio.xfcsreloader.config.ExensioProperties;
 import java.io.IOException;
 import java.nio.file.*;
@@ -186,7 +187,8 @@ public class ReloadPendingMonitor {
                             sessionId, etlComplete.size());
 
                     Set<String> sessionsToFinalize = new HashSet<>();
-                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize);
+                    int pgcKey = resolvePgcKeyForSession(sessionId);
+                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize, pgcKey);
                     for (String sid : sessionsToFinalize) {
                         finalizeSessionIfDone(sid);
                     }
@@ -458,7 +460,8 @@ public class ReloadPendingMonitor {
                 }
 
                 if (exensioProperties.isEnabled()) {
-                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize);
+                    int pgcKey = resolvePgcKeyForSession(sessionId);
+                    triggerExensioForSession(sessionId, etlComplete, sessionsToFinalize, pgcKey);
                 } else {
                     // Exensio disabled: promote all etl_complete files directly to completed.
                     for (ReloadPendingFileEntity pf : etlComplete) {
@@ -583,12 +586,14 @@ public class ReloadPendingMonitor {
      * @param etlCompleteFiles files for this session with status {@code etl_complete} or
      *                         {@code exensio_loading}
      * @param sessionsToFinalize mutable set that collects session ids ready for finalization
+     * @param pgcKey           program-group-class key derived from the session's area/testerType
      */
     void triggerExensioForSession(String sessionId,
                                   List<ReloadPendingFileEntity> etlCompleteFiles,
-                                  Set<String> sessionsToFinalize) {
-        log.info("[PendingMonitor] Triggering Exensio batch for session={} ({} files)",
-                sessionId, etlCompleteFiles.size());
+                                  Set<String> sessionsToFinalize,
+                                  int pgcKey) {
+        log.info("[PendingMonitor] Triggering Exensio batch for session={} ({} files, pgc_key={})",
+                sessionId, etlCompleteFiles.size(), pgcKey);
         try {
             // Best-effort: fill in missing destinationFolder from pp_log before calling Exensio.
             // This covers files that transitioned to etl_complete before pp_log was wired in,
@@ -615,7 +620,7 @@ public class ReloadPendingMonitor {
             }
 
             List<BatchLookupResult.RecordUpdate> updates =
-                    exensioClient.lotWaferLookupBatch(etlCompleteFiles);
+                    exensioClient.lotWaferLookupBatch(etlCompleteFiles, pgcKey);
 
             for (BatchLookupResult.RecordUpdate update : updates) {
                 pendingFileRepository.findById(update.absPath()).ifPresent(pf -> {
@@ -705,6 +710,23 @@ public class ReloadPendingMonitor {
             log.debug("[PendingMonitor] findFileRecursively error in '{}': {}", rootDir, e.getMessage());
             return java.util.Optional.empty();
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // PGC-key resolution
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Resolves the Exensio {@code pgc_key} for a session from its area/testerType,
+     * defaulting to Final Test (2) when the session is missing or has no area.
+     */
+    private int resolvePgcKeyForSession(String sessionId) {
+        if (sessionId == null) {
+            return ExensioPgcKeyResolver.PGC_KEY_FT;
+        }
+        return sessionRepository.findById(sessionId)
+                .map(s -> ExensioPgcKeyResolver.resolve(s.getArea(), s.getTesterType()))
+                .orElse(ExensioPgcKeyResolver.PGC_KEY_FT);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
