@@ -134,14 +134,14 @@ export class RegisterComponent {
 
     const { username, email, password } = this.registerForm.getRawValue();
     this.auth.register(username!, email || null, password!).subscribe({
-      next: (res: any) => {
+      next: () => {
         this.loading.set(false);
-        this.snackBar.open('Registration successful!', 'Close', { duration: 3000 });
-        this.router.navigate(['/verify'], { queryParams: { token: res?.verificationToken } });
+        this.snackBar.open('Registration successful! You can now sign in.', 'Close', { duration: 3000 });
+        void this.router.navigate(['/login']);
       },
       error: (err: any) => {
         this.loading.set(false);
-        this.error.set(err.error?.message || 'Registration failed. User might already exist.');
+        this.error.set(err.error?.error || err.error?.message || 'Registration failed. User might already exist.');
       }
     });
   }

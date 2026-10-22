@@ -1,62 +1,68 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { Component, inject, OnInit } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { Router } from '@angular/router';
 import { AuthService } from './auth.service';
 
 /**
- * Landing component for the /sso-callback route.
- * The DTP backend redirects here after a successful SSO authentication,
- * passing the JWT as a `token` query param and an optional `returnUrl`.
+ * Public landing page for the DTP backend's SSO redirect.
  *
- * Requirements: 2.2, 8.6
+ * The DTP backend redirects here after Azure AD authentication completes,
+ * passing the JWT as a `token` query parameter. This component extracts the
+ * token, stores it via AuthService, and redirects to the dashboard.
  */
 @Component({
-  standalone: true,
   selector: 'app-sso-callback',
+  standalone: true,
+  imports: [CommonModule],
   template: `
-    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;">
-      <span style="color:var(--text-muted,#94a3b8);font-size:1rem;">Completing sign-in…</span>
+    <div class="sso-callback-container">
+      <p class="status-message">Completing SSO authentication…</p>
     </div>
-  `
+  `,
+  styles: [`
+    .sso-callback-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .status-message {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 14px;
+      margin: 0;
+    }
+  `]
 })
 export class SsoCallbackComponent implements OnInit {
-  private readonly route = inject(ActivatedRoute);
-  private readonly router = inject(Router);
   private readonly authService = inject(AuthService);
+  private readonly router = inject(Router);
 
   ngOnInit(): void {
-    const token = this.route.snapshot.queryParamMap.get('token');
-    const rawReturnUrl = this.route.snapshot.queryParamMap.get('returnUrl') ?? '/dashboard';
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get('token');
+    const error = url.searchParams.get('error');
 
-    // Requirement 2.2: if token is missing, redirect to login with error reason
-    if (!token) {
-      void this.router.navigate(['/login'], { queryParams: { reason: 'sso-error' } });
+    if (error) {
+      void this.router.navigate(['/login']);
       return;
     }
 
-    // Cancel any pending silent-SSO timeout so it doesn't race with this success path
-    if (this.authService._silentSsoTimeoutId !== null) {
+    if (!token) {
+      void this.router.navigate(['/login']);
+      return;
+    }
+
+    // Clear the silent SSO timeout set by app.config.ts.
+    if (this.authService._silentSsoTimeoutId) {
       clearTimeout(this.authService._silentSsoTimeoutId);
       this.authService._silentSsoTimeoutId = null;
     }
 
-    // Requirement 8.6: sanitize returnUrl — only allow relative paths, no open redirects
-    const safeReturnUrl = this.sanitizeReturnUrl(rawReturnUrl);
-
     this.authService.handleSsoCallback(token).subscribe({
-      next: () => void this.router.navigateByUrl(safeReturnUrl),
-      error: () => void this.router.navigate(['/login'], { queryParams: { reason: 'sso-error' } })
+      next: () => void this.router.navigate(['/dashboard']),
+      error: () => void this.router.navigate(['/login'])
     });
-  }
-
-  /**
-   * Accepts only relative paths (start with '/', no '://').
-   * Falls back to '/dashboard' for anything else.
-   * Requirement 8.6
-   */
-  sanitizeReturnUrl(url: string): string {
-    if (url && url.startsWith('/') && !url.includes('://')) {
-      return url;
-    }
-    return '/dashboard';
   }
 }

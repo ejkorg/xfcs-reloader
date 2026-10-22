@@ -17,5 +17,6 @@
     <include file="db/changelog/db.changelog-5.9-pending-files-exensio.xml"/>
     <include file="db/changelog/db.changelog-7.1-rename-exensio-loading.xml"/>
     <include file="db/changelog/db.changelog-7.2-add-archive-date.xml"/>
+    <include file="db/changelog/db.changelog-7.3-local-auth.xml"/>
 
 </databaseChangeLog>

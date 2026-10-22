@@ -23,16 +23,16 @@ import { environment } from '../../environments/environment';
             </div>
           </div>
           <p class="welcome-text">Archived File Reload Orchestration</p>
-          <p class="subtitle">Sign in with your Resender account to access xFCS reloading operations.</p>
+          <p class="subtitle">Sign in with your local account to access xFCS reloading operations.</p>
         </div>
 
-        <!-- Requirement 1.4, 7.4: SSO error banner shown when reason=sso-error is in query params -->
+        <!-- SSO error banner shown when redirected back with reason=sso-error -->
         <div class="auth-error sso-error-banner" *ngIf="ssoError()">
           <mat-icon class="sso-error-icon">warning_amber</mat-icon>
           SSO sign-in failed. Please try again or use local login.
         </div>
 
-        <!-- Requirement 1.1, 7.3: SSO button shown only when ssoEnabled is true -->
+        <!-- SSO button shown only when ssoEnabled is true -->
         <div class="sso-section" *ngIf="auth.ssoEnabled()">
           <button
             class="sso-btn"
@@ -217,7 +217,7 @@ export class LoginComponent implements OnInit {
   loading = signal(false);
   error = signal('');
   success = signal('');
-  /** Requirement 1.4, 7.4: true when reason=sso-error is present in query params */
+  /** Show SSO error banner when reason=sso-error is present in query params */
   ssoError = signal(false);
 
   loginForm = this.fb.group({
@@ -226,7 +226,6 @@ export class LoginComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    // Requirement 1.4, 7.4: show SSO error banner if redirected back with reason=sso-error
     const reason = this.route.snapshot.queryParamMap.get('reason');
     if (reason === 'sso-error') {
       this.ssoError.set(true);
@@ -234,8 +233,7 @@ export class LoginComponent implements OnInit {
   }
 
   /**
-   * Requirement 1.2, 1.3: redirect to SSO initiation URL with encoded returnUrl.
-   * Sets loading=true to prevent duplicate clicks (Requirement 1.4).
+   * Redirect to SSO initiation URL with encoded returnUrl.
    */
   onSsoLogin(): void {
     if (this.loading()) return;
@@ -253,13 +251,7 @@ export class LoginComponent implements OnInit {
     this.auth.login(this.loginForm.getRawValue() as { username: string; password: string }).subscribe({
       next: async () => {
         this.success.set('Authenticated successfully. Redirecting...');
-        const safeUrl = this.getSafeReturnUrl();
-        const navigated = await this.router.navigateByUrl(safeUrl);
-
-        if (!navigated && safeUrl !== '/dashboard') {
-          await this.router.navigateByUrl('/dashboard');
-        }
-
+        await this.router.navigateByUrl('/dashboard');
         this.loading.set(false);
       },
       error: (err: any) => {

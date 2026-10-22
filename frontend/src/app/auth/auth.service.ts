@@ -157,43 +157,10 @@ export class AuthService {
       tap((config: AuthConfig) => this.ssoEnabled.set(!!config?.ssoEnabled)),
       map(() => void 0),
       catchError(() => {
-        // If config fetch fails, leave ssoEnabled as false (safe default).
         return of(void 0);
       })
     );
   }
-
-  /**
-   * Stores the SSO-issued token and loads the current user.
-   * Called by SsoCallbackComponent after the DTP backend redirects back with a JWT.
-   * Requirements: 2.2, 5.4
-   */
-  handleSsoCallback(token: string): Observable<void> {
-    this.setSession(token);
-    return this.loadMe().pipe(map(() => void 0));
-  }
-
-  /**
-   * Initiates a silent SSO check via the DTP backend.
-   * Only called when ssoEnabled is true and no local session exists.
-   * Navigates to /login if the redirect does not complete within 5 seconds.
-   * Requirements: 6.1, 6.4
-   */
-  trySilentSso(returnUrl: string): void {
-    const timeoutId = setTimeout(() => {
-      void this.router.navigate(['/login']);
-    }, 5000);
-
-    // Store the timeout ID so SsoCallbackComponent can clear it on success.
-    // We expose it via a simple property so the callback component can cancel it.
-    this._silentSsoTimeoutId = timeoutId;
-
-    window.location.href =
-      `${this.authUrl}/sso/silent?returnUrl=${encodeURIComponent(returnUrl)}`;
-  }
-
-  /** @internal — used by SsoCallbackComponent to cancel the silent SSO timeout on success. */
-  _silentSsoTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   getToken(): string | null {
     return this.accessToken || localStorage.getItem('auth_token') || sessionStorage.getItem('accessToken');
@@ -222,6 +189,24 @@ export class AuthService {
     this.currentUser.set(null);
     this.sessionExpiryService.cancelWarning();
   }
+
+  handleSsoCallback(token: string): Observable<void> {
+    this.setSession(token);
+    return this.loadMe().pipe(map(() => void 0));
+  }
+
+  trySilentSso(returnUrl: string): void {
+    const timeoutId = setTimeout(() => {
+      void this.router.navigate(['/login']);
+    }, 5000);
+
+    this._silentSsoTimeoutId = timeoutId;
+
+    window.location.href =
+      `${this.authUrl}/sso/silent?returnUrl=${encodeURIComponent(returnUrl)}`;
+  }
+
+  _silentSsoTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
   private setSession(token: string | null): void {
     this.cancelScheduledRefresh();

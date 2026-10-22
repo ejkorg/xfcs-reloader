@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                   http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="7.3-app-user-tables" author="xfcs-reloader">
+        <createTable tableName="app_user">
+            <column name="username" type="VARCHAR(255)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="password_hash" type="VARCHAR(255)" defaultValue=""/>
+            <column name="enabled" type="BOOLEAN" defaultValue="true"/>
+            <column name="created_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
+        </createTable>
+
+        <createTable tableName="app_user_role">
+            <column name="username" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="role" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
+        </createTable>
+
+        <addPrimaryKey columnNames="username, role" constraintName="pk_app_user_role" tableName="app_user_role"/>
+
+        <addForeignKeyConstraint baseColumnNames="username"
+                                 baseTableName="app_user_role"
+                                 constraintName="fk_app_user_role_user"
+                                 referencedColumnNames="username"
+                                 referencedTableName="app_user"/>
+
+        <createIndex indexName="idx_app_user_enabled" tableName="app_user" unique="false">
+            <column name="enabled"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="7.4-bootstrap-admin" author="xfcs-reloader">
+        <insert tableName="app_user">
+            <column name="username" value="admin"/>
+            <column name="password_hash" value="{noop}admin123"/>
+            <column name="enabled" value="true"/>
+            <column name="created_at" value="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" value="CURRENT_TIMESTAMP"/>
+        </insert>
+        <insert tableName="app_user_role">
+            <column name="username" value="admin"/>
+            <column name="role" value="ADMIN"/>
+            <column name="created_at" value="CURRENT_TIMESTAMP"/>
+        </insert>
+    </changeSet>
+
+</databaseChangeLog>
