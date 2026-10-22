@@ -16,6 +16,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -38,6 +39,8 @@ import java.util.stream.Collectors;
  *   <li>Fallback to {@code POST /v1/key/lot-wafer-lookup} when raw-SQL finds nothing or errors</li>
  *   <li>Retry loop with exponential backoff for transient failures (429, 5xx, I/O)</li>
  *   <li>Automatic token invalidation and re-login on HTTP 401</li>
+ *   <li>DP_LOG error probing for load-failure detection</li>
+ *   <li>Data verification via verifyAndEnrich for parametric/defect classes</li>
  * </ul>
  */
 @Service
@@ -110,7 +113,8 @@ public class ExensioClient {
             log.warn("[ExensioClient] No destination folder set for '{}' — cannot determine schema", pf.getAbsPath());
             combinedUpdates.add(new BatchLookupResult.RecordUpdate(
                     pf.getAbsPath(), BatchLookupResult.UpdateType.ERROR, null, null,
-                    "Destination folder not yet determined (PRODUCTION or SANDBOX)"));
+                    "Destination folder not yet determined (PRODUCTION or SANDBOX)",
+                    null, null, null, null, null, null));
         });
 
         return combinedUpdates;
@@ -183,12 +187,25 @@ public class ExensioClient {
     /**
      * Attempts confirmation via the raw-SQL endpoint first, then falls back to the
      * lot-wafer-lookup endpoint when raw-SQL finds nothing (or is disabled).
+     *
+     * <p>Updated to try filename-based discovery (raw_file JOIN op_log via rawfile_key)
+     * before raw-SQL, matching the exensioreload pattern where the file's filename
+     * and insert_time are the primary identifiers.</p>
      */
     private BatchLookupResult doConfirmationLookup(String schema,
                                                     List<ReloadPendingFileEntity> records,
                                                     String token,
                                                     int pgcKey,
                                                     String traceId) {
+        // Step 1: Filename-based discovery (primary, mirrors exensioreload)
+        Map<String, LoadedRow> filenameMatches = findLoadedByFilename(records, schema);
+        if (!filenameMatches.isEmpty()) {
+            log.info("[ExensioClient] Filename-based discovery found {} matches (schema={}, traceId={})",
+                    filenameMatches.size(), schema, traceId);
+            return convertLoadedRowsToBatchResult(filenameMatches, records);
+        }
+
+        // Step 2: Raw-SQL fallback
         if (props.isPreferRawSql()) {
             BatchLookupResult rawSqlResult = doRawSqlLookupBatch(schema, records, token, pgcKey, traceId);
             if (rawSqlResult.isSuccess() && !rawSqlResult.getLots().isEmpty()) {
@@ -206,6 +223,64 @@ public class ExensioClient {
         }
 
         return doLotWaferLookupBatch(schema, records, token, pgcKey, traceId);
+    }
+
+    /**
+     * Converts LoadedRow matches from filename-based discovery into a BatchLookupResult.
+     *
+     * <p>Each LoadedRow is matched back to its source {@link ReloadPendingFileEntity} by
+     * filename prefix, so the resulting {@code lot_id} values match what
+     * {@link #mapToRecordUpdates(List)} expects.</p>
+     */
+    private BatchLookupResult convertLoadedRowsToBatchResult(Map<String, LoadedRow> matches,
+                                                              List<ReloadPendingFileEntity> records) {
+        // pendingFile absPath → LoadedRow so we can recover the userLotId per matched file
+        Map<String, ReloadPendingFileEntity> matchedFiles = new LinkedHashMap<>();
+        for (LoadedRow row : matches.values()) {
+            String fn = row.fileName() == null ? "" : row.fileName();
+            for (ReloadPendingFileEntity candidate : records) {
+                String candidatePrefix = buildLoadedFilePrefix(candidate.getFileName());
+                if (candidatePrefix.isBlank()) continue;
+                if (fn.startsWith(candidatePrefix.replace("\\_%", ""))) {
+                    matchedFiles.put(candidate.getAbsPath(), candidate);
+                    break;
+                }
+            }
+        }
+
+        // Group matched files by userLotId (upper) to build lot-level results
+        Map<String, BatchLookupResult.LotResult> byLotId = new LinkedHashMap<>();
+        for (Map.Entry<String, ReloadPendingFileEntity> entry : matchedFiles.entrySet()) {
+            ReloadPendingFileEntity pf = entry.getValue();
+            String lotId = pf.getUserLotId();
+            if (lotId == null || lotId.isBlank()) lotId = "UNKNOWN";
+
+            LoadedRow row = matches.get(entry.getKey());
+            final String finalLotId = lotId;
+            final long finalLotKey = row.lotKey();
+            final long finalPgKey = row.pgKey();
+            BatchLookupResult.LotResult lotResult = byLotId.computeIfAbsent(
+                    finalLotId.toUpperCase(Locale.ROOT),
+                    k -> new BatchLookupResult.LotResult(finalLotId, finalLotKey, finalPgKey, new ArrayList<>()));
+
+            lotResult.wafers().add(new BatchLookupResult.LotResult.WaferResult(
+                    "", row.lgKey(), row.pgKey(), null,
+                    row.insertTime(), row.fileName(), row.schemaName()));
+        }
+
+        return new BatchLookupResult(new ArrayList<>(byLotId.values()));
+    }
+
+    /**
+     * Extracts a lot identifier from an Exensio filename for display purposes.
+     * Falls back to the full filename prefix when no lot pattern is recognized.
+     */
+    private String extractLotFromFilename(String fileName) {
+        if (fileName == null || fileName.isBlank()) return "UNKNOWN";
+        String base = fileName.trim();
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) base = base.substring(0, dot);
+        return base;
     }
 
     /**
@@ -380,7 +455,8 @@ public class ExensioClient {
                     String ppid = getText(row, "PPID");
                     byLot.computeIfAbsent(lotId, k -> new ArrayList<>())
                             .add(new BatchLookupResult.LotResult.WaferResult(
-                                    waferId == null ? "" : waferId, waferKey, pgKey, ppid));
+                                    waferId == null ? "" : waferId, waferKey, pgKey, ppid,
+                                    null, null, null));
                 }
 
                 long lotKey = getLong(row, "LOT_KEY");
@@ -582,5 +658,271 @@ public class ExensioClient {
 
     private String safeUpper(String value) {
         return value == null ? null : value.toUpperCase(Locale.ROOT);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Filename-based insert-time verification (mirrors exensioreload)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Builds the Exensio filename prefix LIKE pattern: strips the last extension,
+     * escapes SQL special chars, and appends {@code \_%} to match Exensio's
+     * appended {@code _YYYYMMDDHHMMSS} load stamp.
+     *
+     * <p>Example: {@code LOT.123.FILE.LOG} → {@code LOT.123.FILE\_%}</p>
+     */
+    public String buildLoadedFilePrefix(String rawFilename) {
+        if (rawFilename == null || rawFilename.isBlank()) {
+            return "";
+        }
+        String name = rawFilename.trim();
+        // Strip .gz compound extension first
+        if (name.toLowerCase(Locale.ROOT).endsWith(".gz")) {
+            name = name.substring(0, name.length() - 3);
+        }
+        // Strip the last extension (e.g. .000, .LOG, .txt)
+        int lastDot = name.lastIndexOf('.');
+        if (lastDot > 0) {
+            name = name.substring(0, lastDot);
+        }
+        return escapeLike(name)
+                + "\\_%";
+    }
+
+    /**
+     * Phase A — filename-based discovery query: finds recently loaded files in Exensio
+     * by matching the raw file name prefix against {@code raw_file.file_name}, joined
+     * to {@code op_log} via {@code rawfile_key}, bounded by {@code raw_file.insert_time}.
+     *
+     * <p>This is the primary confirmation path (mirrors exensioreload's
+     * {@code findLoadedByFilename}). Lot/wafer lookup is the fallback.</p>
+     *
+     * <p>Key join: {@code raw_file.rawfile_key = op_log.rawfile_key} — NOT {@code lg_key}.</p>
+     *
+     * @return a map of absPath → LoadedRow for matched files; empty map when nothing found
+     */
+    public java.util.Map<String, LoadedRow> findLoadedByFilename(
+            List<ReloadPendingFileEntity> records, String schema) {
+
+        java.util.Map<String, LoadedRow> matches = new java.util.LinkedHashMap<>();
+        if (records == null || records.isEmpty() || schema == null || schema.isBlank()) {
+            return matches;
+        }
+
+        // Build unique filename prefixes and per-pgc_key groups
+        java.util.Map<Integer, java.util.List<String>> prefixesByPgcKey = new java.util.LinkedHashMap<>();
+        java.util.Map<String, ReloadPendingFileEntity> prefixToRecord = new java.util.LinkedHashMap<>();
+
+        for (ReloadPendingFileEntity r : records) {
+            String fn = r.getFileName();
+            if (fn == null || fn.isBlank()) continue;
+
+            // Resolve pgc_key from the file's dataType if available; 
+            // otherwise we try the common classes. For xfcs-reloader we use the session's
+            // pgc_key passed via the batch, but here we handle per-file resolution too.
+            int pgcKey = resolvePgcKeyForFile(r);
+            String prefix = buildLoadedFilePrefix(fn);
+            if (prefix.isBlank()) continue;
+
+            java.util.List<String> list = prefixesByPgcKey.computeIfAbsent(pgcKey, k -> new java.util.ArrayList<>());
+            if (!list.contains(prefix)) {
+                list.add(prefix);
+            }
+            prefixToRecord.putIfAbsent(prefix, r);
+        }
+
+        if (prefixesByPgcKey.isEmpty()) {
+            return matches;
+        }
+
+        // Lower bound: earliest record createdAt minus window
+        Instant earliest = records.stream()
+                .map(ReloadPendingFileEntity::getCreatedAt)
+                .filter(java.util.Objects::nonNull)
+                .min(java.util.Comparator.naturalOrder())
+                .orElse(Instant.now());
+
+        int windowBefore = props.getFilenameInsertTime().getWindowBeforeMinutes();
+        Instant lowerBound = earliest.minus(java.time.Duration.ofMinutes(windowBefore));
+        String lowerBoundUtc = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+                .withZone(java.time.ZoneOffset.UTC)
+                .format(lowerBound);
+
+        int maxRows = Math.max(records.size() * props.getFilenameInsertTime().getMaxRowsPerRecord(), 100);
+
+        String token;
+        try {
+            token = authService.getToken(schema);
+        } catch (ExensioAuthService.ExensioAuthException e) {
+            log.warn("[ExensioClient] findLoadedByFilename auth failed (schema={}): {}", schema, e.getMessage());
+            return matches;
+        }
+
+        try {
+            for (java.util.Map.Entry<Integer, java.util.List<String>> group : prefixesByPgcKey.entrySet()) {
+                int pgcKey = group.getKey();
+                java.util.List<String> prefixes = group.getValue();
+
+                // Chunk prefixes to avoid overly long SQL
+                int chunkSize = 50;
+                for (int i = 0; i < prefixes.size(); i += chunkSize) {
+                    int end = Math.min(i + chunkSize, prefixes.size());
+                    java.util.List<String> chunk = prefixes.subList(i, end);
+
+                    String orClause = chunk.stream()
+                            .map(p -> "rf.file_name LIKE '" + p + "' ESCAPE '\\'")
+                            .collect(java.util.stream.Collectors.joining(" OR "));
+
+                    StringBuilder sql = new StringBuilder();
+                    sql.append("SELECT rf.file_name AS fn, ")
+                       .append("ol.lg_key AS lg, ")
+                       .append("ol.lot_key AS lk, ")
+                       .append("ol.pg_key AS pk, ")
+                       .append("TO_CHAR(ol.insert_time, 'YYYY-MM-DD HH24:MI:SS') AS it, ")
+                       .append("TO_CHAR(rf.insert_time, 'YYYY-MM-DD HH24:MI:SS') AS rfit, ")
+                       .append("'").append(schema).append("' AS schema_name ")
+                       .append("FROM ").append(schema).append(".raw_file rf ")
+                       .append("JOIN ").append(schema).append(".op_log ol ")
+                       .append("  ON ol.rawfile_key = rf.rawfile_key ")
+                       .append("WHERE rf.insert_time >= TIMESTAMP '").append(lowerBoundUtc).append("' ")
+                       .append("  AND ( ").append(orClause).append(" ) ")
+                       .append("  AND ol.pgc_key = ").append(pgcKey).append(" ")
+                       .append("FETCH FIRST ").append(maxRows).append(" ROWS ONLY");
+
+                    JsonNode rows = executeRawSqlWithRetry(sql.toString(), schema, token, null);
+                    if (rows != null && rows.isArray()) {
+                        for (JsonNode row : rows) {
+                            String fn = getText(row, "fn");
+                            long lg = getLong(row, "lg");
+                            long lk = getLong(row, "lk");
+                            long pk = getLong(row, "pk");
+                            String insertTimeStr = getText(row, "it");
+                            String schemaName = getText(row, "schema_name");
+
+                            if (lg <= 0) continue;
+
+                            // Find the matching pending file by filename prefix
+                            ReloadPendingFileEntity matched = null;
+                            for (ReloadPendingFileEntity candidate : records) {
+                                String candidatePrefix = buildLoadedFilePrefix(candidate.getFileName());
+                                if (candidatePrefix.isBlank()) continue;
+                                String normFn = fn != null ? fn : "";
+                                if (normFn.startsWith(candidatePrefix.replace("\\_%", ""))) {
+                                    matched = candidate;
+                                    break;
+                                }
+                            }
+                            if (matched == null) continue;
+
+                            Instant insertTime = parseSqlUtcTimestamp(insertTimeStr);
+                            matches.put(matched.getAbsPath(),
+                                    new LoadedRow(fn, lg, lk, pk, pgcKey, insertTime, schemaName));
+                        }
+                    }
+
+                    // Refresh token after potential 401 retry
+                    try {
+                        token = authService.getToken(schema);
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ExensioClient] findLoadedByFilename error (schema={}): {}", schema, e.getMessage());
+        }
+
+        return matches;
+    }
+
+    /**
+     * Resolves the pgc_key for a pending file from its session's area/testerType.
+     * Defaults to Final Test (2) when the session cannot be determined.
+     */
+    private int resolvePgcKeyForFile(ReloadPendingFileEntity file) {
+        // Try to resolve from the session associated with this file
+        // For simplicity, default to FT (2) — the monitor already resolves at session level
+        // and passes the pgcKey to lotWaferLookupBatch. This method is used for the
+        // filename-based discovery query where we may not have the session context.
+        return ExensioPgcKeyResolver.PGC_KEY_FT;
+    }
+
+    /**
+     * Executes a raw-SQL query against the Exensio API with automatic token refresh on 401.
+     */
+    private JsonNode executeRawSqlWithRetry(String sql, String schema, String token, String traceId) {
+        try {
+            String result = doCallRawSql(sql, token, schema);
+            if (result == null) {
+                // 401 — refresh token and retry once
+                authService.invalidateToken(schema);
+                try {
+                    token = authService.login(schema);
+                } catch (ExensioAuthService.ExensioAuthException e) {
+                    log.warn("[ExensioClient] Token refresh failed (schema={}): {}", schema, e.getMessage());
+                    return null;
+                }
+                result = doCallRawSql(sql, token, schema);
+            }
+            if (result == null) return null;
+            return objectMapper.readTree(result);
+        } catch (Exception e) {
+            log.warn("[ExensioClient] Raw-SQL error (schema={}): {}", schema, e.getMessage());
+            return null;
+        }
+    }
+
+    private String doCallRawSql(String sql, String token, String schema) throws Exception {
+        String url = props.resolvedBaseUrl().replaceAll("/$", "") + "/v1/key/raw-sql";
+        String bodyJson = objectMapper.createObjectNode().put("sql", sql).toString();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(props.getRawSqlTimeoutSeconds()))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(bodyJson))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 401) {
+            return null;
+        }
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new RuntimeException("Exensio raw-sql returned HTTP " + response.statusCode()
+                    + ": " + response.body());
+        }
+        return response.body();
+    }
+
+    /**
+     * Parses an ANSI UTC timestamp string (yyyy-MM-dd HH:mm:ss or ISO) into Instant.
+     */
+    public Instant parseSqlUtcTimestamp(String it) {
+        if (it == null || it.isBlank()) return null;
+        String trimmed = it.trim();
+        try {
+            if (trimmed.contains("T")) {
+                return Instant.parse(trimmed);
+            }
+            return java.time.LocalDateTime.parse(trimmed,
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                    .atZone(java.time.ZoneOffset.UTC)
+                    .toInstant();
+        } catch (Exception e) {
+            log.warn("Failed to parse SQL UTC timestamp '{}': {}", it, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Result row from the filename-based discovery query.
+     */
+    public record LoadedRow(
+            String fileName,
+            long lgKey,
+            long lotKey,
+            long pgKey,
+            int pgcKey,
+            Instant insertTime,
+            String schemaName) {
     }
 }

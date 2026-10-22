@@ -43,12 +43,32 @@ public class BatchLookupResult {
     private final String errorMessage;
 
     public record LotResult(String lotId, long lotKey, long pgKey, List<WaferResult> wafers) {
-        public record WaferResult(String waferId, long waferKey, long pgKey, String ppid) {}
+        public record WaferResult(
+                String waferId,
+                long waferKey,
+                long pgKey,
+                String ppid,
+                java.time.Instant insertTime,
+                String fileName,
+                String schema) {
+        }
     }
 
     public enum UpdateType { DONE, NOT_FOUND, ERROR }
 
-    public record RecordUpdate(String absPath, UpdateType type, Long waferKey, Long pgKey, String errorMessage) {}
+    public record RecordUpdate(
+            String absPath,
+            UpdateType type,
+            Long waferKey,
+            Long pgKey,
+            String errorMessage,
+            String lotId,
+            String waferId,
+            String fileName,
+            String insertTime,
+            String schema,
+            String ppid) {
+    }
 
     public BatchLookupResult(List<LotResult> lots) {
         this.lots = lots;
@@ -79,7 +99,8 @@ public class BatchLookupResult {
 
         if (!success) {
             for (ReloadPendingFileEntity r : records) {
-                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, errorMessage));
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, errorMessage,
+                        null, null, null, null, null, null));
             }
             return updates;
         }
@@ -104,7 +125,8 @@ public class BatchLookupResult {
         for (ReloadPendingFileEntity r : records) {
             String lotId = r.getUserLotId();
             if (lotId == null || lotId.isBlank()) {
-                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, "Missing userLotId"));
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.ERROR, null, null, "Missing userLotId",
+                        null, null, null, null, null, null));
                 continue;
             }
 
@@ -113,13 +135,18 @@ public class BatchLookupResult {
             if (wafer != null) {
                 updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.DONE,
                         wafer.waferKey() > 0 ? wafer.waferKey() : null,
-                        wafer.pgKey(), null));
+                        wafer.pgKey(), null,
+                        lotId, wafer.waferId(), wafer.fileName(), 
+                        wafer.insertTime() != null ? wafer.insertTime().toString() : null,
+                        wafer.schema(), wafer.ppid()));
             } else if (lotPgKeyByLotId.containsKey(key)) {
                 // Lot found but no wafers — still treat as DONE with lot-level pg_key
                 updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.DONE,
-                        null, lotPgKeyByLotId.get(key), null));
+                        null, lotPgKeyByLotId.get(key), null,
+                        lotId, null, null, null, null, null));
             } else {
-                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.NOT_FOUND, null, null, null));
+                updates.add(new RecordUpdate(r.getAbsPath(), UpdateType.NOT_FOUND, null, null, null,
+                        lotId, null, null, null, null, null));
             }
         }
         return updates;
@@ -152,7 +179,8 @@ public class BatchLookupResult {
                         long pgKey      = w.path("pg_key").asLong(0);
                         String ppid     = w.path("ppid").asText(null);
                         if (waferId != null && waferKey > 0) {
-                            waferResults.add(new LotResult.WaferResult(waferId, waferKey, pgKey, ppid));
+                            waferResults.add(new LotResult.WaferResult(waferId, waferKey, pgKey, ppid,
+                                    null, null, null));
                         }
                     }
                 }

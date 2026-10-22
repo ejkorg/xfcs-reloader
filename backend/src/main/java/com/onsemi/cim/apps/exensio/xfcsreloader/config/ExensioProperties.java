@@ -41,6 +41,35 @@ public class ExensioProperties {
      */
     private int maxLookupWindowMinutes = 60;
 
+    /** Filename-based insert-time verification configuration. */
+    private final FilenameInsertTime filenameInsertTime = new FilenameInsertTime();
+
+    public FilenameInsertTime getFilenameInsertTime() { return filenameInsertTime; }
+
+    public static class FilenameInsertTime {
+        /** Minutes before enrichment_started_at to bound the discovery query. Default: 30. */
+        private int windowBeforeMinutes = 30;
+        /** Maximum rows per record in the discovery query. Default: 50. */
+        private int maxRowsPerRecord = 50;
+        /** Comma-separated pgc_keys to include in filename discovery. Default: "1,2,4,5,14". */
+        private String pgcKeys = "1,2,4,5,14";
+        /** Fallback query time window in hours. Default: 6. */
+        private int fallbackQueryTimeWindowHours = 6;
+        /** Monitor timeout in minutes. Default: 360. */
+        private int monitorTimeoutMinutes = 360;
+
+        public int getWindowBeforeMinutes() { return windowBeforeMinutes; }
+        public void setWindowBeforeMinutes(int v) { this.windowBeforeMinutes = v; }
+        public int getMaxRowsPerRecord() { return maxRowsPerRecord; }
+        public void setMaxRowsPerRecord(int v) { this.maxRowsPerRecord = v; }
+        public String getPgcKeys() { return pgcKeys; }
+        public void setPgcKeys(String v) { this.pgcKeys = v; }
+        public int getFallbackQueryTimeWindowHours() { return fallbackQueryTimeWindowHours; }
+        public void setFallbackQueryTimeWindowHours(int v) { this.fallbackQueryTimeWindowHours = v; }
+        public int getMonitorTimeoutMinutes() { return monitorTimeoutMinutes; }
+        public void setMonitorTimeoutMinutes(int v) { this.monitorTimeoutMinutes = v; }
+    }
+
     public boolean isConfigured() {
         return enabled && resolvedBaseUrl() != null && !resolvedBaseUrl().isBlank();
     }

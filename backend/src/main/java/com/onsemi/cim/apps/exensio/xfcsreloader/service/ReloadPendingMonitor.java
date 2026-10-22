@@ -632,10 +632,18 @@ public class ReloadPendingMonitor {
                             pf.setResolvedAt(Instant.now());
                             pf.setExensioWaferKey(update.waferKey());
                             pf.setExensioPgKey(update.pgKey());
+                            if (update.schema() != null && !update.schema().isBlank()) {
+                                pf.setDestinationFolder(update.schema());
+                            }
                             String dest = pf.getDestinationFolder() != null
                                     ? " [" + pf.getDestinationFolder() + "]" : "";
+                            String insertInfo = update.insertTime() != null
+                                    ? " insertTime=" + update.insertTime() : "";
+                            String schemaInfo = update.schema() != null
+                                    ? " schema=" + update.schema() : "";
                             String msg = "Loaded in Exensio" + dest + ": " + pf.getFileName()
-                                    + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey() + ")";
+                                    + " (Lot: " + pf.getUserLotId() + ", pgKey=" + update.pgKey()
+                                    + schemaInfo + insertInfo + ")";
                             appendEvent(pf.getSessionId(), "file_completed", msg, pf.getRequester(), null, pf.getArchiveYear(), pf.getArchiveMonth());
                             log.info("[PendingMonitor] Exensio confirmed (session={}): {}", sessionId, pf.getFileName());
                             terminal = true;

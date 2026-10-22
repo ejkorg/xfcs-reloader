@@ -272,6 +272,90 @@ import { CommonModule } from '@angular/common';
           <rect x="16" y="7" width="4" height="13" rx="1" stroke="currentColor" stroke-width="2" fill="none"/>
         </g>
 
+        <!-- Filter List -->
+        <g *ngSwitchCase="'filter_list'">
+          <path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z" fill="currentColor"/>
+        </g>
+
+        <!-- Insights / Analytics -->
+        <g *ngSwitchCase="'insights'">
+          <path d="M21 21H3M21 21V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M5 17l4-5 4 3 4-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Schedule / Time -->
+        <g *ngSwitchCase="'schedule'">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </g>
+
+        <!-- Play Arrow -->
+        <g *ngSwitchCase="'play_arrow'">
+          <path d="M8 5v14l11-7L8 5z" fill="currentColor"/>
+        </g>
+
+        <!-- Autorenew / Spinning refresh -->
+        <g *ngSwitchCase="'autorenew'">
+          <path d="M12 6V3l-4 4 4 4V8a6 6 0 016 6 6 6 0 01-1.05 3.39" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M12 18v3l4-4-4-4v3a6 6 0 01-6-6 6 6 0 011.05-3.39" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Send -->
+        <g *ngSwitchCase="'send'">
+          <path d="M22 2L11 13M22 2L15 22L11 13M22 2L2 9L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Help Outline -->
+        <g *ngSwitchCase="'help_outline'">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </g>
+
+        <!-- Notifications -->
+        <g *ngSwitchCase="'notifications'">
+          <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 003.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Notifications Active -->
+        <g *ngSwitchCase="'notifications_active'">
+          <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 003.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="19" cy="4" r="2.5" fill="currentColor"/>
+        </g>
+
+        <!-- Trending Up -->
+        <g *ngSwitchCase="'trending_up'">
+          <path d="M23 6l-9.5 9.5-5-5L1 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 6h6v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Trending Down -->
+        <g *ngSwitchCase="'trending_down'">
+          <path d="M23 18l-9.5-9.5-5 5L1 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M17 18h6v-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Trending Flat -->
+        <g *ngSwitchCase="'trending_flat'">
+          <path d="M2 12h20M18 8l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
+        <!-- Error Outline -->
+        <g *ngSwitchCase="'error_outline'">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M12 8v4M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </g>
+
+        <!-- Search Off -->
+        <g *ngSwitchCase="'search_off'">
+          <circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/>
+          <path d="M21 21l-4.35-4.35M8.5 8.5l5 5M13.5 8.5l-5 5M1 1l22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </g>
+
+        <!-- Inbox -->
+        <g *ngSwitchCase="'inbox'">
+          <path d="M22 12h-6l-2 3h-4l-2-3H2M5 5h14l3 7v7a2 2 0 01-2 2H4a2 2 0 01-2-2v-7l3-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+
         <!-- Default fallback -->
         <g *ngSwitchDefault>
           <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>

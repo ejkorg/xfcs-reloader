@@ -1,9 +1,13 @@
 <div class="dashboard-root">
   <header class="dashboard-header">
     <div class="title-group">
-      <h1>xFCS <span class="accent">Reloader Dashboard</span></h1>
-      <p class="subtitle">System health and recent archival activity overview.</p>
+      <div class="title-badge">
+        <app-glass-icon name="dashboard" [size]="20" color="primary"></app-glass-icon>
+        <h1>xFCS <span class="accent">Reloader</span></h1>
+      </div>
+      <p class="subtitle">Monitor archival sessions, ETL status, and Exensio confirmation in real time.</p>
       <p class="last-updated" *ngIf="lastUpdated()">
+        <app-glass-icon name="schedule" [size]="14" color="muted"></app-glass-icon>
         Last updated: {{ lastUpdated() | date:'medium' }}
       </p>
     </div>
@@ -17,7 +21,7 @@
 
   <!-- KPI Section -->
   <section class="stats-section mb-6">
-    <app-xfcs-stats [dashboard]="data()" [loading]="loading()"></app-xfcs-stats>
+    <app-xfcs-stats [dashboard]="data()" [loading]="loading()" [lastStatus]="activeSessions()[0]"></app-xfcs-stats>
   </section>
 
   <div class="dashboard-grid">
@@ -26,8 +30,13 @@
       <!-- Active Sessions Panel -->
       <section class="glass-panel sessions-panel">
         <div class="panel-header">
-          <app-glass-icon name="sync" color="primary"></app-glass-icon>
-          <h3>Active <span class="accent">Sessions</span></h3>
+          <div class="panel-icon-wrap">
+            <app-glass-icon name="sync" [size]="20" color="primary"></app-glass-icon>
+          </div>
+          <div class="panel-title-group">
+            <h3>Active <span class="accent">Sessions</span></h3>
+            <span class="panel-subtitle" *ngIf="activeSessions().length">{{ activeSessions().length }} running</span>
+          </div>
         </div>
 
         @if (loadingSessions()) {
@@ -41,7 +50,7 @@
           </div>
         } @else if (sessionsError()) {
           <div class="panel-error" role="alert">
-            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <app-glass-icon name="error_outline" color="error" [size]="20"></app-glass-icon>
             <p>{{ sessionsError() }}</p>
             <app-glass-button variant="tertiary" size="small" (clicked)="retrySessions()">
               Retry
@@ -50,8 +59,14 @@
         } @else if (activeSessions().length) {
           <div class="session-list" role="list" aria-label="Active reload sessions">
             <div class="session-row" *ngFor="let s of activeSessions(); trackBy: trackBySessionId" role="listitem">
-              <span class="session-id">{{ s.sessionId.slice(0, 8) }}</span>
-              <span class="env-badge">{{ s.environment ?? '—' }}</span>
+              <div class="session-main">
+                <span class="session-id">{{ s.sessionId.slice(0, 8) }}</span>
+                <span class="env-badge" [class.env-production]="(s.environment || '').toLowerCase() === 'production'"
+                      [class.env-sandbox]="(s.environment || '').toLowerCase() === 'sandbox'"
+                      [class.env-qa]="(s.environment || '').toLowerCase() === 'qa'">
+                  {{ s.environment ?? '—' }}
+                </span>
+              </div>
               <span class="requester">{{ s.requester ?? '—' }}</span>
               <div class="progress-wrap">
                 <div class="progress-bar" role="progressbar" [attr.aria-valuenow]="sessionProgress(s)" aria-valuemin="0" aria-valuemax="100">
@@ -63,19 +78,30 @@
             </div>
           </div>
         } @else {
-          <div class="empty-state">No active sessions — system is idle.</div>
+          <div class="empty-state">
+            <app-glass-icon name="check_circle" [size]="32" color="success"></app-glass-icon>
+            <span>No active sessions — system is idle.</span>
+          </div>
         }
 
         <div class="panel-footer">
-          <a routerLink="/history" class="footer-link">View All Sessions →</a>
+          <a routerLink="/history" class="footer-link">
+            <app-glass-icon name="history" [size]="14" color="primary"></app-glass-icon>
+            View All Sessions
+          </a>
         </div>
       </section>
 
       <!-- Recent Lots Feed -->
       <section class="glass-panel feed-panel">
         <div class="panel-header">
-          <app-glass-icon name="history" color="primary"></app-glass-icon>
-          <h3>Recent <span class="accent">Extracted Lots</span></h3>
+          <div class="panel-icon-wrap">
+            <app-glass-icon name="inventory_2" [size]="20" color="primary"></app-glass-icon>
+          </div>
+          <div class="panel-title-group">
+            <h3>Recent <span class="accent">Lots</span></h3>
+            <span class="panel-subtitle" *ngIf="data()?.recentLots?.length">Latest activity</span>
+          </div>
         </div>
 
         @if (loadingLots()) {
@@ -88,7 +114,7 @@
           </div>
         } @else if (lotsError()) {
           <div class="panel-error" role="alert">
-            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <app-glass-icon name="error_outline" color="error" [size]="20"></app-glass-icon>
             <p>{{ lotsError() }}</p>
             <app-glass-button variant="tertiary" size="small" (clicked)="retryDashboard()">
               Retry
@@ -99,18 +125,24 @@
             <div class="lot-item" *ngFor="let lot of data()?.recentLots?.slice(0, 8); let i = index; trackBy: trackByLot"
                  [style.animation-delay]="i * 0.05 + 's'" role="listitem">
               <div class="lot-icon">
-                <app-glass-icon name="inventory_2" [size]="18" color="muted"></app-glass-icon>
+                <app-glass-icon name="done_all" [size]="18" color="success"></app-glass-icon>
               </div>
               <div class="lot-name">{{ lot }}</div>
-              <div class="lot-badge">Extracted</div>
+              <span class="lot-badge">Extracted</span>
             </div>
           </div>
         } @else {
-          <div class="empty-state">No recent lot activity.</div>
+          <div class="empty-state">
+            <app-glass-icon name="inbox" [size]="32" color="muted"></app-glass-icon>
+            <span>No recent lot activity.</span>
+          </div>
         }
 
         <div class="panel-footer">
-          <a routerLink="/history" class="footer-link">View Full History →</a>
+          <a routerLink="/history" class="footer-link">
+            <app-glass-icon name="history" [size]="14" color="primary"></app-glass-icon>
+            View Full History
+          </a>
         </div>
       </section>
     </div>
@@ -120,8 +152,12 @@
       <!-- Quick Actions Panel -->
       <section class="glass-panel actions-panel">
         <div class="panel-header">
-          <app-glass-icon name="dashboard" color="primary"></app-glass-icon>
-          <h3>Quick <span class="accent">Actions</span></h3>
+          <div class="panel-icon-wrap">
+            <app-glass-icon name="play_arrow" [size]="20" color="primary"></app-glass-icon>
+          </div>
+          <div class="panel-title-group">
+            <h3>Quick <span class="accent">Actions</span></h3>
+          </div>
         </div>
         <div class="actions-list">
           <div class="action-item">
@@ -151,13 +187,17 @@
       <!-- System Status Panel -->
       <section class="glass-panel status-panel">
         <div class="panel-header">
-          <app-glass-icon name="monitor_heart" color="warning"></app-glass-icon>
-          <h3>System <span class="accent">Status</span></h3>
+          <div class="panel-icon-wrap">
+            <app-glass-icon name="monitor_heart" [size]="20" color="warning"></app-glass-icon>
+          </div>
+          <div class="panel-title-group">
+            <h3>System <span class="accent">Status</span></h3>
+          </div>
         </div>
 
         @if (statusError()) {
           <div class="panel-error" role="alert">
-            <app-glass-icon name="error" color="error" [size]="20"></app-glass-icon>
+            <app-glass-icon name="error_outline" color="error" [size]="20"></app-glass-icon>
             <p>{{ statusError() }}</p>
             <app-glass-button variant="tertiary" size="small" (clicked)="retryDashboard()">
               Retry
@@ -168,24 +208,27 @@
             <div class="status-item">
               <span class="status-dot" [class.online]="connected()" [class.offline]="!connected()"
                     role="status" [attr.aria-label]="connected() ? 'API Connected' : 'API Disconnected'"></span>
-              <span class="status-label">Backend API:</span>
+              <span class="status-label">Backend API</span>
               <span class="status-val" [class.success]="connected()" [class.error]="!connected()">
                 {{ connected() ? 'Connected' : 'Disconnected' }}
               </span>
             </div>
             <div class="status-item">
               <app-glass-icon name="storage" [size]="16" color="muted"></app-glass-icon>
-              <span class="status-label">Archive Mount:</span>
+              <span class="status-label">Archive Mount</span>
               <span class="status-val mono">{{ archiveMountPath() }}</span>
             </div>
             <div class="status-item">
               <app-glass-icon name="timer" [size]="16" color="muted"></app-glass-icon>
-              <span class="status-label">Stuck Timeout:</span>
+              <span class="status-label">Stuck Timeout</span>
               <span class="status-val">{{ data()?.stuckTimeoutMin ?? '—' }} min</span>
             </div>
             <hr class="divider">
             <div class="quick-tips">
-              <h4><app-glass-icon name="lightbulb" [size]="18" color="warning"></app-glass-icon> Quick Tip</h4>
+              <h4>
+                <app-glass-icon name="lightbulb" [size]="18" color="warning"></app-glass-icon>
+                Quick Tip
+              </h4>
               <p>Reloading a lot will automatically decompress any .gz files and move them to the environment's inbox for ETL processing.</p>
             </div>
           </div>
