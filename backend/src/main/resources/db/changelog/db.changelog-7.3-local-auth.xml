@@ -11,8 +11,8 @@
             </column>
             <column name="password_hash" type="VARCHAR(255)" defaultValue=""/>
             <column name="enabled" type="BOOLEAN" defaultValue="true"/>
-            <column name="created_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
-            <column name="updated_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
         </createTable>
 
         <createTable tableName="app_user_role">
@@ -22,7 +22,7 @@
             <column name="role" type="VARCHAR(255)">
                 <constraints nullable="false"/>
             </column>
-            <column name="created_at" type="TIMESTAMP" defaultValue="CURRENT_TIMESTAMP"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
         </createTable>
 
         <addPrimaryKey columnNames="username, role" constraintName="pk_app_user_role" tableName="app_user_role"/>
@@ -43,13 +43,13 @@
             <column name="username" value="admin"/>
             <column name="password_hash" value="{noop}admin123"/>
             <column name="enabled" value="true"/>
-            <column name="created_at" value="CURRENT_TIMESTAMP"/>
-            <column name="updated_at" value="CURRENT_TIMESTAMP"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" valueComputed="CURRENT_TIMESTAMP"/>
         </insert>
         <insert tableName="app_user_role">
             <column name="username" value="admin"/>
             <column name="role" value="ADMIN"/>
-            <column name="created_at" value="CURRENT_TIMESTAMP"/>
+            <column name="created_at" valueComputed="CURRENT_TIMESTAMP"/>
         </insert>
     </changeSet>
 
